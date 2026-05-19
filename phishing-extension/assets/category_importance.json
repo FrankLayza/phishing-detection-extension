@@ -1,0 +1,50 @@
+{
+  "URL_STRUCTURE": {
+    "total_importance": 0.2617393580173621,
+    "features": [
+      "URLLength",
+      "DomainLength",
+      "IsDomainIP",
+      "URLSimilarityIndex",
+      "CharContinuationRate",
+      "TLDLegitimateProb",
+      "URLCharProb",
+      "NoOfSubDomain",
+      "HasObfuscation",
+      "NoOfObfuscatedChar"
+    ]
+  },
+  "DOMAIN_TRUST": {
+    "total_importance": 0.1479392037963258,
+    "features": [
+      "DomainAgeBucket",
+      "HasTitle",
+      "DomainTitleMatchScore",
+      "URLTitleMatchScore",
+      "HasFavicon",
+      "Robots",
+      "IsResponsive",
+      "NoOfURLRedirect",
+      "NoOfSelfRedirect",
+      "HasDescription"
+    ]
+  },
+  "PAGE_CONTENT": {
+    "total_importance": 0.4555002076037681,
+    "features": [
+      "LineOfCode",
+      "LargestLineLength",
+      "NoOfPopup",
+      "NoOfiFrame",
+      "HasExternalFormSubmit",
+      "HasSocialNet",
+      "HasSubmitButton",
+      "HasHiddenFields",
+      "HasPasswordField",
+      "Bank",
+      "Pay",
+      "Crypto",
+      "HasCopyrightInfo"
+    ]
+  }
+}

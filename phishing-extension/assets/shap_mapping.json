@@ -1,0 +1,290 @@
+{
+  "URLLength": {
+    "importance": 0.007038129560583637,
+    "category": "URL_STRUCTURE",
+    "description": "URL is unusually long (>75 chars is suspicious)",
+    "thresholds": {
+      "high": 100,
+      "medium": 75
+    }
+  },
+  "DomainLength": {
+    "importance": 0.0008362360549025371,
+    "category": "URL_STRUCTURE",
+    "description": "Domain name is lengthy (may hide true destination)",
+    "thresholds": {}
+  },
+  "IsDomainIP": {
+    "importance": 0.0,
+    "category": "URL_STRUCTURE",
+    "description": "Uses raw IP address instead of a domain name",
+    "thresholds": {}
+  },
+  "URLSimilarityIndex": {
+    "importance": 0.24160595806636762,
+    "category": "URL_STRUCTURE",
+    "description": "Domain/path resembles a known brand (typosquatting)",
+    "thresholds": {
+      "high": 0.8,
+      "medium": 0.6
+    }
+  },
+  "CharContinuationRate": {
+    "importance": 0.0009151913938802435,
+    "category": "URL_STRUCTURE",
+    "description": "Unusual character continuation patterns in URL",
+    "thresholds": {}
+  },
+  "TLDLegitimateProb": {
+    "importance": 0.0017204498625411806,
+    "category": "URL_STRUCTURE",
+    "description": "Top-level domain is associated with low-trust registrars",
+    "thresholds": {
+      "high": 0.3,
+      "medium": 0.5
+    }
+  },
+  "URLCharProb": {
+    "importance": 0.0034625237894547693,
+    "category": "URL_STRUCTURE",
+    "description": "Unusual character distribution in URL string",
+    "thresholds": {}
+  },
+  "NoOfSubDomain": {
+    "importance": 0.006155960278574773,
+    "category": "URL_STRUCTURE",
+    "description": "Excessive subdomain nesting (e.g. login.bank.evil.com)",
+    "thresholds": {
+      "high": 3,
+      "medium": 2
+    }
+  },
+  "HasObfuscation": {
+    "importance": 0.0,
+    "category": "URL_STRUCTURE",
+    "description": "URL contains percent-encoded obfuscated characters",
+    "thresholds": {}
+  },
+  "NoOfObfuscatedChar": {
+    "importance": 4.9090110573218095e-06,
+    "category": "URL_STRUCTURE",
+    "description": "Multiple obfuscated characters found in URL",
+    "thresholds": {
+      "high": 5,
+      "medium": 2
+    }
+  },
+  "ObfuscationRatio": {
+    "importance": 3.22695668237799e-07,
+    "category": "UNKNOWN",
+    "description": "High proportion of obfuscated characters",
+    "thresholds": {
+      "high": 0.1,
+      "medium": 0.05
+    }
+  },
+  "NoOfLettersInURL": {
+    "importance": 0.008764075541714088,
+    "category": "UNKNOWN",
+    "description": "Total letter count in URL",
+    "thresholds": {}
+  },
+  "LetterRatioInURL": {
+    "importance": 0.010283422092459086,
+    "category": "UNKNOWN",
+    "description": "Ratio of letters to total URL length",
+    "thresholds": {}
+  },
+  "NoOfDegitsInURL": {
+    "importance": 0.009005813303123675,
+    "category": "UNKNOWN",
+    "description": "High digit count (common in auto-generated phishing URLs)",
+    "thresholds": {}
+  },
+  "DegitRatioInURL": {
+    "importance": 0.017019180939058465,
+    "category": "UNKNOWN",
+    "description": "Unusually high digit ratio in URL",
+    "thresholds": {}
+  },
+  "NoOfEqualsInURL": {
+    "importance": 0.0002493102961146734,
+    "category": "UNKNOWN",
+    "description": "Multiple query parameter assignments",
+    "thresholds": {}
+  },
+  "NoOfQMarkInURL": {
+    "importance": 0.0003369814726170279,
+    "category": "UNKNOWN",
+    "description": "Query string is present",
+    "thresholds": {}
+  },
+  "NoOfAmpersandInURL": {
+    "importance": 1.5285632109618117e-10,
+    "category": "UNKNOWN",
+    "description": "Multiple query parameters chained",
+    "thresholds": {}
+  },
+  "NoOfOtherSpecialCharsInURL": {
+    "importance": 0.03392340203749306,
+    "category": "UNKNOWN",
+    "description": "Excessive special characters in URL",
+    "thresholds": {}
+  },
+  "SpacialCharRatioInURL": {
+    "importance": 0.010698385134119756,
+    "category": "UNKNOWN",
+    "description": "High special character density",
+    "thresholds": {}
+  },
+  "IsHTTPS": {
+    "importance": 0.044540336917319505,
+    "category": "UNKNOWN",
+    "description": "Connection is not encrypted (no HTTPS)",
+    "thresholds": {}
+  },
+  "DomainAgeBucket": {
+    "importance": 0.0,
+    "category": "DOMAIN_TRUST",
+    "description": "Domain was recently registered (<1 year = suspicious)",
+    "thresholds": {
+      "high": 0,
+      "medium": 1
+    }
+  },
+  "HasTitle": {
+    "importance": 0.001080817996174265,
+    "category": "DOMAIN_TRUST",
+    "description": "Page is missing a <title> tag",
+    "thresholds": {}
+  },
+  "DomainTitleMatchScore": {
+    "importance": 0.03394992981128174,
+    "category": "DOMAIN_TRUST",
+    "description": "Domain name does not match page title",
+    "thresholds": {}
+  },
+  "URLTitleMatchScore": {
+    "importance": 0.01892130523496742,
+    "category": "DOMAIN_TRUST",
+    "description": "URL path does not match page title content",
+    "thresholds": {}
+  },
+  "HasFavicon": {
+    "importance": 0.011554354143324827,
+    "category": "DOMAIN_TRUST",
+    "description": "Missing website favicon (icon)",
+    "thresholds": {}
+  },
+  "Robots": {
+    "importance": 0.0009385467829516512,
+    "category": "DOMAIN_TRUST",
+    "description": "No robots.txt meta tag found",
+    "thresholds": {}
+  },
+  "IsResponsive": {
+    "importance": 0.008546480323064692,
+    "category": "DOMAIN_TRUST",
+    "description": "Non-responsive design (missing viewport meta tag)",
+    "thresholds": {}
+  },
+  "NoOfURLRedirect": {
+    "importance": 6.14686230629776e-05,
+    "category": "DOMAIN_TRUST",
+    "description": "Multiple external redirects detected",
+    "thresholds": {
+      "high": 5,
+      "medium": 2
+    }
+  },
+  "NoOfSelfRedirect": {
+    "importance": 5.175239600455422e-05,
+    "category": "DOMAIN_TRUST",
+    "description": "Self-redirect loop detected",
+    "thresholds": {}
+  },
+  "HasDescription": {
+    "importance": 0.07283454848549367,
+    "category": "DOMAIN_TRUST",
+    "description": "Missing meta description tag",
+    "thresholds": {}
+  },
+  "LineOfCode": {
+    "importance": 0.1297125969975911,
+    "category": "PAGE_CONTENT",
+    "description": "Minimal page content (phishing pages are often sparse)",
+    "thresholds": {}
+  },
+  "LargestLineLength": {
+    "importance": 0.009780228215813952,
+    "category": "PAGE_CONTENT",
+    "description": "Unusual or minified code structure",
+    "thresholds": {}
+  },
+  "NoOfPopup": {
+    "importance": 0.00033463548390548183,
+    "category": "PAGE_CONTENT",
+    "description": "Popup windows detected (window.open calls)",
+    "thresholds": {}
+  },
+  "NoOfiFrame": {
+    "importance": 0.01792569775478387,
+    "category": "PAGE_CONTENT",
+    "description": "Hidden iframe elements embedded in page",
+    "thresholds": {}
+  },
+  "HasExternalFormSubmit": {
+    "importance": 8.209293259485791e-06,
+    "category": "PAGE_CONTENT",
+    "description": "Form submits credentials to an external domain",
+    "thresholds": {}
+  },
+  "HasSocialNet": {
+    "importance": 0.13720993728485978,
+    "category": "PAGE_CONTENT",
+    "description": "Social media links present (sign of legitimate site)",
+    "thresholds": {}
+  },
+  "HasSubmitButton": {
+    "importance": 0.047067712689282025,
+    "category": "PAGE_CONTENT",
+    "description": "Submit button found (credentials collection)",
+    "thresholds": {}
+  },
+  "HasHiddenFields": {
+    "importance": 0.014123860628674769,
+    "category": "PAGE_CONTENT",
+    "description": "Hidden form fields detected (data harvesting)",
+    "thresholds": {}
+  },
+  "HasPasswordField": {
+    "importance": 6.674032278445585e-05,
+    "category": "PAGE_CONTENT",
+    "description": "Password input field is present on page",
+    "thresholds": {}
+  },
+  "Bank": {
+    "importance": 0.00020816557002253445,
+    "category": "PAGE_CONTENT",
+    "description": "Banking-related keywords found in page text",
+    "thresholds": {}
+  },
+  "Pay": {
+    "importance": 0.0007687208285787802,
+    "category": "PAGE_CONTENT",
+    "description": "Payment-related keywords found in page text",
+    "thresholds": {}
+  },
+  "Crypto": {
+    "importance": 1.770487202436502e-05,
+    "category": "PAGE_CONTENT",
+    "description": "Cryptocurrency keywords found in page text",
+    "thresholds": {}
+  },
+  "HasCopyrightInfo": {
+    "importance": 0.09827599766218761,
+    "category": "PAGE_CONTENT",
+    "description": "Missing copyright information (sign of fake page)",
+    "thresholds": {}
+  }
+}

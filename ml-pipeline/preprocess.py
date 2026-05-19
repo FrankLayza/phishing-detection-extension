@@ -11,14 +11,12 @@ phiusiil = pd.read_csv('datasets/phiusiil.csv')
 # Adjust column names to match actual file
 phiusiil = phiusiil[['URL', 'label']].rename(columns={'URL': 'url', 'label': 'label'})
 
-# Load ISCX - filter to phishing and benign only
-iscx = pd.read_csv('datasets/All.csv')
-iscx = iscx[iscx['URL_Type_obf_Type'].isin(['phishing', 'benign'])]
-iscx['label'] = iscx['URL_Type_obf_Type'].map({'phishing': 1, 'benign': 0})
-iscx = iscx[['URL', 'label']].rename(columns={'URL': 'url'})
+# Note: ISCX dataset ('datasets/All.csv') has been removed from this pipeline
+# because it contains pre-extracted features and NO raw URLs. We cannot
+# run our custom feature_extraction.py on it.
 
-# Combine and shuffle
-df = pd.concat([phiusiil, iscx], ignore_index=True).sample(frac=1, random_state=42)
+# Process the dataset
+df = phiusiil.sample(frac=1, random_state=42)
 df = df.dropna(subset=['url'])
 
 # Extract features

@@ -33,16 +33,20 @@ models/*.json
 
 # Node / Plasmo Browser Extension
 node_modules/
+phishing-extension/node_modules/
+phishing-extension/.plasmo/
+phishing-extension/build/
+phishing-extension/dist/
+phishing-extension/out/
+phishing-extension/.env*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .plasmo/
-phishing-extension/build/
-phishing-extension/dist/
-phishing-extension/out/
 .env
 .env*.local
+*.pkl
 
 # System/IDE Specific Files
 .DS_Store
