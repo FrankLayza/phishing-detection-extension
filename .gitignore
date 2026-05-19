@@ -1,0 +1,59 @@
+# Python Virtual Environment
+venv/
+.venv/
+ENV/
+env/
+
+# Python caching and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# Large Datasets and Downloads (gitignored to keep repo clean)
+datasets/
+data/
+*.zip
+*.csv
+*.gz
+*.tar.gz
+get-pip.py
+
+# Machine Learning models (serialized artifacts)
+models/*.pkl
+models/*.json
+# Keep the models folder struct but ignore pickles
+!models/.gitkeep
+
+# Node / Plasmo Browser Extension
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.plasmo/
+phishing-extension/build/
+phishing-extension/dist/
+phishing-extension/out/
+.env
+.env*.local
+
+# System/IDE Specific Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+Consolidated_Implementation_Guide.md
+PhishGuard_Implementation_Guide.md
