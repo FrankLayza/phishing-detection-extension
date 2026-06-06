@@ -134,7 +134,7 @@ def _print_feature_importance(model):
         print(f"  {'Feature':<38} {'Importance':>10}")
         print(f"  {'-'*50}")
         for feat, imp in top10:
-            bar = '█' * int(imp * 200)
+            bar = '#' * int(imp * 200)
             print(f"  {feat:<38} {imp:>8.4f}  {bar}")
     else:
         importances = dict(zip(ALL_FEATURES, model.feature_importances_))

@@ -19,6 +19,9 @@ def extract_lexical_features(url: str) -> dict:
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
     
+    # Strip 'www.' subdomain to prevent dataset bias (100% of legit URLs contain www.)
+    url = url.replace('://www.', '://')
+    
     parsed = urlparse(url)
     extracted = tldextract.extract(url)
     domain = f"{extracted.domain}.{extracted.suffix}" if extracted.suffix else extracted.domain

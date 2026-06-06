@@ -61,3 +61,8 @@ Thumbs.db
 
 Consolidated_Implementation_Guide.md
 PhishGuard_Implementation_Guide.md
+
+# AI Agents & Tools
+.claude/
+.agents/
+.gemini/

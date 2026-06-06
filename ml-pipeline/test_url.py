@@ -39,8 +39,8 @@ GSB_API_KEY = os.environ.get('GSB_API_KEY', 'YOUR_GSB_API_KEY_HERE')
 GSB_ENDPOINT = 'https://safebrowsing.googleapis.com/v4/threatMatches:find'
 
 # ML model is borderline if phishing probability is between these values
-BORDERLINE_LOW  = 0.40
-BORDERLINE_HIGH = 0.70
+BORDERLINE_LOW  = 0.50
+BORDERLINE_HIGH = 0.85
 
 # Weights for fusion
 WEIGHT_ML  = 0.65
@@ -132,7 +132,7 @@ UNREACHABLE_DEFAULTS.update({
 # --------------------------------------------------------------------------
 # Main detection pipeline
 # --------------------------------------------------------------------------
-def detect(url: str, verbose: bool = True) -> dict:
+def detect(url: str, verbose: bool = True, audit: bool = False) -> dict:
     def log(msg): 
         if verbose: print(msg)
 
@@ -158,16 +158,16 @@ def detect(url: str, verbose: bool = True) -> dict:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(fetch_url, timeout=7, headers=headers, allow_redirects=True)
         html = response.text
-        log(f"         ✅ HTTP {response.status_code} — {len(html):,} chars, {len(response.history)} redirect(s)")
+        log(f"         [OK] HTTP {response.status_code} - {len(html):,} chars, {len(response.history)} redirect(s)")
         html_features = extract_content_features(html, fetch_url, response=response)
     except requests.exceptions.ConnectionError:
-        log("         ⚠️  DNS resolution failed — domain is dead or doesn't exist.")
+        log("         [WARNING] DNS resolution failed - domain is dead or doesn't exist.")
         page_unreachable = True
     except requests.exceptions.Timeout:
-        log("         ⚠️  Timeout — server not responding.")
+        log("         [WARNING] Timeout - server not responding.")
         page_unreachable = True
     except Exception as e:
-        log(f"         ⚠️  Fetch failed: {type(e).__name__}")
+        log(f"         [WARNING] Fetch failed: {type(e).__name__}")
         page_unreachable = True
 
     if page_unreachable:
@@ -201,7 +201,7 @@ def detect(url: str, verbose: bool = True) -> dict:
     scaler = joblib.load('models/scaler.pkl')
     model  = joblib.load('models/random_forest.pkl')
 
-    X_scaled      = scaler.transform(df)
+    X_scaled      = scaler.transform(df.values)
     ml_label      = model.predict(X_scaled)[0]
     ml_probs      = model.predict_proba(X_scaled)[0]
     ml_phish_prob = float(ml_probs[1])
@@ -219,7 +219,7 @@ def detect(url: str, verbose: bool = True) -> dict:
 
     if is_borderline or force_gsb:
         reason = "Forced via flag" if force_gsb else f"Borderline confidence ({ml_phish_prob:.1%})"
-        log(f"\n[STEP 3] ⚡ {reason} — querying Google Safe Browsing...")
+        log(f"\n[STEP 3] [FALLBACK] {reason} - querying Google Safe Browsing...")
         gsb_result = check_google_safe_browsing(fetch_url)
         gsb_result['queried'] = True
         if gsb_result['available']:
@@ -241,7 +241,8 @@ def detect(url: str, verbose: bool = True) -> dict:
         if gsb_result['is_phishing']:
              final_score = max(ml_phish_prob, 0.85) # GSB positive is a strong override
         else:
-             final_score = (WEIGHT_ML * ml_phish_prob) + (WEIGHT_GSB * gsb_score)
+             # GSB is clean: cap final_score at 0.60 so it falls into SUSPICIOUS at worst
+             final_score = min(ml_phish_prob, 0.60)
     else:
         final_score = ml_phish_prob  # Trust ML fully when GSB not used
 
@@ -249,20 +250,31 @@ def detect(url: str, verbose: bool = True) -> dict:
     if page_unreachable and age_bucket == 1:
         final_score = max(final_score, 0.75)  # Dead + new domain = very suspicious
 
-    is_phishing = final_score >= 0.5
+    if final_score < 0.50:
+        verdict = "CLEAN"
+        is_phishing = False
+    elif final_score < 0.85:
+        verdict = "SUSPICIOUS"
+        is_phishing = False
+    else:
+        verdict = "PHISHING"
+        is_phishing = True
 
     # ------------------------------------------------------------------
     # STEP 5: Display Verdict
     # ------------------------------------------------------------------
     print(f"\n{'='*60}")
     if page_unreachable:
-        print(f"  ℹ️  Page was unreachable (domain dead or blocked)")
-    if is_phishing:
-        print(f"  🚨 VERDICT: PHISHING / MALICIOUS")
-        print(f"  🚨 Risk Score: {final_score:.1%}")
+        print(f"  [INFO] Page was unreachable (domain dead or blocked)")
+    
+    if verdict == "PHISHING":
+        print(f"  [VERDICT] PHISHING / MALICIOUS")
+    elif verdict == "SUSPICIOUS":
+        print(f"  [VERDICT] SUSPICIOUS / BORDERLINE")
     else:
-        print(f"  ✅ VERDICT: SAFE / LEGITIMATE")
-        print(f"  ✅ Risk Score: {final_score:.1%}  (below 50% threshold)")
+        print(f"  [VERDICT] SAFE / LEGITIMATE")
+        
+    print(f"  [VERDICT] Risk Score: {final_score:.1%}")
 
     print(f"\n  Breakdown:")
     print(f"    ML Model Score:  {ml_phish_prob:.1%}")
@@ -277,14 +289,33 @@ def detect(url: str, verbose: bool = True) -> dict:
     print(f"    Google Safe Browsing: {gsb_str}")
     print(f"    Domain Age: {age_labels.get(age_bucket, 'Unknown')}")
 
-    # Top features
+    # Top features & Audit Mode
     importances = dict(zip(ALL_FEATURES, model.feature_importances_))
-    top5 = sorted(importances.items(), key=lambda x: x[1], reverse=True)[:5]
-    print(f"\n  Top 5 contributing features:")
-    for feat, imp in top5:
-        val = combined.get(feat, 'N/A')
-        print(f"    {feat:<38} val={val}  weight={imp:.3f}")
-    print(f"{'='*60}\n")
+    sorted_importances = sorted(importances.items(), key=lambda x: x[1], reverse=True)
+    
+    if audit:
+        print("\n" + "=" * 60)
+        print("  FEATURE IMPORTANCE AUDIT")
+        print("=" * 60)
+        print(f"  {'Rank':<5} {'Feature':<30} {'Weight':<10} {'Extracted Value':<15}")
+        print("-" * 60)
+        for idx, (feat, weight) in enumerate(sorted_importances, 1):
+            val = combined.get(feat, 0.0)
+            print(f"  {idx:<5} {feat:<30} {weight:<10.4f} {str(val):<15}")
+        print("=" * 60)
+        print("\n  Canonical Feature Order (44 features):")
+        print(ALL_FEATURES)
+        print("\n  Raw Vector (44 values):")
+        print([float(df[feat].values[0]) for feat in ALL_FEATURES])
+        print("\n  Scaled Vector (44 values):")
+        print(X_scaled[0].tolist())
+        print("=" * 60 + "\n")
+    else:
+        print(f"\n  Top 5 contributing features:")
+        for feat, imp in sorted_importances[:5]:
+            val = combined.get(feat, 'N/A')
+            print(f"    {feat:<38} val={val}  weight={imp:.3f}")
+        print(f"{'='*60}\n")
 
     return {
         'url': url,
@@ -299,7 +330,7 @@ def detect(url: str, verbose: bool = True) -> dict:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python ml-pipeline/test_url.py <URL> [--force-gsb]")
+        print("Usage: python ml-pipeline/test_url.py <URL> [--force-gsb] [--audit]")
         sys.exit(1)
 
     force = '--force-gsb' in sys.argv
@@ -307,4 +338,14 @@ if __name__ == "__main__":
         os.environ['FORCE_GSB'] = '1'
         sys.argv.remove('--force-gsb')
 
-    detect(sys.argv[1])
+    audit = '--audit' in sys.argv
+    if audit:
+        sys.argv.remove('--audit')
+
+    url_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if not url_args:
+        print("Error: No URL provided.")
+        print("Usage: python ml-pipeline/test_url.py <URL> [--force-gsb] [--audit]")
+        sys.exit(1)
+
+    detect(url_args[0], audit=audit)

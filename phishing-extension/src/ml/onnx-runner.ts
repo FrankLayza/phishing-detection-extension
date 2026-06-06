@@ -1,73 +1,89 @@
-import * as ort from "onnxruntime-web";
+/**
+ * Lightweight Random Forest inference engine.
+ * Loads the model from a compact JSON file exported by export_model_json.py.
+ * No ONNX dependency required — pure TypeScript tree traversal.
+ */
 import type { FeatureVector } from "../types";
 
-// Explicitly set WASM path if needed by Plasmo, though usually auto-resolved
-ort.env.wasm.wasmPaths = "/assets/";
+interface TreeLeaf {
+  v: number[];  // class probabilities [p_safe, p_phishing]
+}
+
+interface TreeNode {
+  f: number;     // feature index
+  t: number;     // threshold
+  l: TreeNode | TreeLeaf;  // left child (<=)
+  r: TreeNode | TreeLeaf;  // right child (>)
+}
+
+interface ModelData {
+  n_estimators: number;
+  n_features: number;
+  classes: number[];
+  feature_names: string[];
+  scaler: { min: number[]; scale: number[] };
+  trees: (TreeNode | TreeLeaf)[];
+}
+
+function isLeaf(node: TreeNode | TreeLeaf): node is TreeLeaf {
+  return "v" in node;
+}
+
+function predictTree(tree: TreeNode | TreeLeaf, features: number[]): number[] {
+  if (isLeaf(tree)) {
+    return tree.v;
+  }
+  if (features[tree.f] <= tree.t) {
+    return predictTree(tree.l, features);
+  }
+  return predictTree(tree.r, features);
+}
 
 export class MLRunner {
-  private session: ort.InferenceSession | null = null;
-  private scaler: { min: number[]; scale: number[] } | null = null;
+  private model: ModelData | null = null;
 
   async init() {
-    if (this.session) return;
-    
-    // We will place the model and scaler JSON in the assets directory
-    const modelUrl = chrome.runtime.getURL("assets/phishing_model.onnx");
-    this.session = await ort.InferenceSession.create(modelUrl, {
-      executionProviders: ["wasm"]
-    });
+    if (this.model) return;
 
-    // In a full implementation, we load the MinMaxScaler params here
-    // For now we'll do a basic pass-through or mock scaler
-    try {
-      const scalerUrl = chrome.runtime.getURL("assets/scaler.json");
-      const resp = await fetch(scalerUrl);
-      this.scaler = await resp.json();
-    } catch (e) {
-      console.warn("Could not load scaler, using raw features");
-    }
+    const modelUrl = chrome.runtime.getURL("assets/phishing_model.json");
+    const resp = await fetch(modelUrl);
+    this.model = await resp.json();
+    console.log(`PhishGuard: Model loaded (${this.model!.n_estimators} trees, ${this.model!.n_features} features)`);
   }
 
-  async predict(features: FeatureVector): Promise<{ isPhishing: boolean, score: number }> {
+  async predict(features: FeatureVector): Promise<{ isPhishing: boolean; score: number }> {
     await this.init();
+    const model = this.model!;
 
-    // Map object to 44-element array in exact same order as python training
-    const featureKeys: (keyof FeatureVector)[] = [
-      "URLLength", "DomainLength", "IsDomainIP", "URLSimilarityIndex", 
-      "CharContinuationRate", "TLDLegitimateProb", "URLCharProb", "NoOfSubDomain", 
-      "HasObfuscation", "NoOfObfuscatedChar", "ObfuscationRatio", "NoOfLettersInURL", 
-      "LetterRatioInURL", "NoOfDegitsInURL", "DegitRatioInURL", "NoOfEqualsInURL", 
-      "NoOfQMarkInURL", "NoOfAmpersandInURL", "NoOfOtherSpecialCharsInURL", 
-      "SpacialCharRatioInURL", "IsHTTPS", "DomainAgeBucket", "HasTitle", 
-      "DomainTitleMatchScore", "URLTitleMatchScore", "HasFavicon", "Robots", 
-      "IsResponsive", "NoOfURLRedirect", "NoOfSelfRedirect", "HasDescription", 
-      "LineOfCode", "LargestLineLength", "NoOfPopup", "NoOfiFrame", 
-      "HasExternalFormSubmit", "HasSocialNet", "HasSubmitButton", "HasHiddenFields", 
-      "HasPasswordField", "Bank", "Pay", "Crypto", "HasCopyrightInfo"
-    ];
+    // Map feature object to array in correct order
+    const rawArray = model.feature_names.map(
+      (name) => (features as unknown as Record<string, number>)[name] ?? 0
+    );
 
-    const rawArray = featureKeys.map(k => features[k] || 0);
-    
-    // Scale features if scaler is loaded
-    const scaledArray = this.scaler 
-      ? rawArray.map((val, i) => (val - this.scaler!.min[i]) * this.scaler!.scale[i])
-      : rawArray;
+    // Apply MinMaxScaler: scaled = x * scale_ + min_
+    // (min_ and scale_ are sklearn's pre-computed attributes, NOT data_min_/data_max_)
+    const scaledArray = rawArray.map(
+      (val, i) => val * model.scaler.scale[i] + model.scaler.min[i]
+    );
 
-    const tensor = new ort.Tensor("float32", new Float32Array(scaledArray), [1, 44]);
-    const feeds = { float_input: tensor };
+    // Average predictions from all trees
+    const probs = new Array(model.classes.length).fill(0);
+    for (const tree of model.trees) {
+      const leafProbs = predictTree(tree, scaledArray);
+      for (let c = 0; c < probs.length; c++) {
+        probs[c] += leafProbs[c];
+      }
+    }
+    for (let c = 0; c < probs.length; c++) {
+      probs[c] /= model.n_estimators;
+    }
 
-    const results = await this.session!.run(feeds);
-    
-    // Scikit-learn random forest usually outputs 'output_label' and 'output_probability'
-    // Depending on ZipMap setting. If zipmap=False, output is usually an array of probs
-    const probs = results[this.session!.outputNames[1]].data as Float32Array;
-    
-    // probs is usually [prob_safe, prob_phishing]
+    // classes[1] = phishing probability
     const phishingProb = probs.length > 1 ? probs[1] : probs[0];
-    
+
     return {
       isPhishing: phishingProb >= 0.5,
-      score: phishingProb
+      score: phishingProb,
     };
   }
 }
