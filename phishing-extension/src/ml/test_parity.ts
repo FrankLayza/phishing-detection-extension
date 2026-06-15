@@ -1,4 +1,4 @@
-import { MLRunner } from "./onnx-runner";
+import { MLRunner } from "./rf-inference";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -11,8 +11,7 @@ import * as path from "path";
 
 (global as any).fetch = async (url: string) => {
   // Model file is located at phishing-extension/assets/phishing_model.json
-  // We resolve relative to this script's directory
-  const filePath = path.resolve(__dirname, "../../assets/phishing_model.json");
+  const filePath = path.resolve(__dirname, "../assets/phishing_model.json");
   const data = fs.readFileSync(filePath, "utf-8");
   return {
     json: async () => JSON.parse(data)

@@ -202,6 +202,14 @@ def detect(url: str, verbose: bool = True, audit: bool = False) -> dict:
     model  = joblib.load('models/random_forest.pkl')
 
     X_scaled      = scaler.transform(df.values)
+    
+    # Fix for IsHTTPS which scales incorrectly due to training data bias
+    if 'IsHTTPS' in ALL_FEATURES:
+        idx = ALL_FEATURES.index('IsHTTPS')
+        raw_val = float(df['IsHTTPS'].values[0])
+        data_max = float(scaler.data_max_[idx])
+        X_scaled[0, idx] = max(0.0, min(1.0, raw_val / data_max if data_max > 0 else 0.0))
+
     ml_label      = model.predict(X_scaled)[0]
     ml_probs      = model.predict_proba(X_scaled)[0]
     ml_phish_prob = float(ml_probs[1])

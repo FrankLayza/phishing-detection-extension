@@ -1,4 +1,4 @@
-import { MLRunner } from "../ml/onnx-runner";
+import { MLRunner } from "../ml/rf-inference";
 import { ShapApproximator } from "../ml/shap-approximator";
 import { urlCache } from "../utils/cache";
 import type { FeatureVector, DetectionResult } from "../types";
