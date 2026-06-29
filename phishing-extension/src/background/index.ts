@@ -6,8 +6,47 @@ import type { FeatureVector, DetectionResult } from "../types";
 const mlRunner = new MLRunner();
 const shapApproximator = new ShapApproximator();
 
-// Initialize models
-Promise.all([mlRunner.init(), shapApproximator.init()]).catch(console.error);
+// ---------------------------------------------------------------------------
+// Reputation allowlist (top-sites). URL-only ML cannot distinguish a popular
+// legitimate bare domain (google.com) from phishing on a reputable TLD, because
+// the signal isn't in the URL string. We therefore short-circuit known-popular
+// registrable domains to CLEAN and let the ML model handle unknown domains and
+// typosquats. The list is bundled on-device, so this stays privacy-preserving.
+// ---------------------------------------------------------------------------
+let allowlist: Set<string> | null = null;
+
+async function initAllowlist() {
+  if (allowlist) return;
+  try {
+    const resp = await fetch(chrome.runtime.getURL("assets/top_domains.json"));
+    allowlist = new Set<string>(await resp.json());
+    console.log(`PhishGuard: Reputation allowlist loaded (${allowlist.size} domains)`);
+  } catch (e) {
+    console.error("PhishGuard: failed to load allowlist", e);
+    allowlist = new Set();
+  }
+}
+
+/** True if the URL's registrable domain (eTLD+1) is a known-popular site. */
+function isAllowlisted(url: string): boolean {
+  if (!allowlist || allowlist.size === 0) return false;
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  const labels = host.split(".");
+  // Test the last 2 and last 3 labels against the PSL-derived allowlist
+  // (covers bbc.co.uk via "bbc.co.uk", google.com via "google.com").
+  for (let take = 2; take <= 3 && take <= labels.length; take++) {
+    if (allowlist.has(labels.slice(-take).join("."))) return true;
+  }
+  return false;
+}
+
+// Initialize models + allowlist
+Promise.all([mlRunner.init(), shapApproximator.init(), initAllowlist()]).catch(console.error);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "ANALYZE_PAGE") {
@@ -21,9 +60,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: true, result: cached });
           return;
         }
-        
-        // 2. Run ML Model
+
         const startTime = Date.now();
+
+        // 2. Reputation fast-path: known-popular domain → CLEAN (skip ML)
+        await initAllowlist();
+        if (isAllowlisted(url)) {
+          const repResult: DetectionResult = {
+            url,
+            timestamp: Date.now(),
+            prediction: { isPhishing: false, score: 0.05, source: 'OVERRIDE' },
+            explanations: [{
+              feature: "Reputation",
+              value: 1,
+              importance: 1,
+              description: "Recognized as a well-known, popular website (reputation allowlist)",
+              category: "Reputation",
+            }],
+            processingTimeMs: Date.now() - startTime,
+          };
+          urlCache.set(url, repResult);
+          const repTabId = sender.tab?.id;
+          if (repTabId) {
+            await chrome.storage.local.set({ [`result_${repTabId}`]: repResult });
+            chrome.action.setBadgeText({ text: "✓", tabId: repTabId });
+            chrome.action.setBadgeBackgroundColor({ color: "#00FF00", tabId: repTabId });
+          }
+          sendResponse({ success: true, result: repResult });
+          return;
+        }
+
+        // 3. Run ML Model (unknown domain)
         let mlPrediction = await mlRunner.predict(features);
         
         // 3. Google Safe Browsing API Fallback for borderline cases

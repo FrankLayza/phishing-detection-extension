@@ -1,81 +1,6 @@
 {
-  "DomainLength": {
-    "importance": 0.20317775428742624,
-    "category": "URL_STRUCTURE",
-    "description": "Domain name is lengthy (may hide true destination)",
-    "thresholds": {}
-  },
-  "URLLength": {
-    "importance": 0.08840951533509438,
-    "category": "URL_STRUCTURE",
-    "description": "URL is unusually long (>75 chars is suspicious)",
-    "thresholds": {
-      "high": 100,
-      "medium": 75
-    }
-  },
-  "SpacialCharRatioInURL": {
-    "importance": 0.08132049116864347,
-    "category": "UNKNOWN",
-    "description": "High special character density",
-    "thresholds": {}
-  },
-  "URLCharProb": {
-    "importance": 0.0776759463939503,
-    "category": "URL_STRUCTURE",
-    "description": "Unusual character distribution in URL string",
-    "thresholds": {}
-  },
-  "LetterRatioInURL": {
-    "importance": 0.07686390853592331,
-    "category": "UNKNOWN",
-    "description": "Ratio of letters to total URL length",
-    "thresholds": {}
-  },
-  "TLDLegitimateProb": {
-    "importance": 0.0760125136787497,
-    "category": "URL_STRUCTURE",
-    "description": "Top-level domain is associated with low-trust registrars",
-    "thresholds": {
-      "high": 0.3,
-      "medium": 0.5
-    }
-  },
-  "DegitRatioInURL": {
-    "importance": 0.0744512809878908,
-    "category": "UNKNOWN",
-    "description": "Unusually high digit ratio in URL",
-    "thresholds": {}
-  },
-  "CharContinuationRate": {
-    "importance": 0.07074628961841616,
-    "category": "URL_STRUCTURE",
-    "description": "Unusual character continuation patterns in URL",
-    "thresholds": {}
-  },
-  "NoOfDegitsInURL": {
-    "importance": 0.06953233707502181,
-    "category": "UNKNOWN",
-    "description": "High digit count (common in auto-generated phishing URLs)",
-    "thresholds": {}
-  },
-  "URLSimilarityIndex": {
-    "importance": 0.06067007315840944,
-    "category": "URL_STRUCTURE",
-    "description": "Domain/path resembles a known brand (typosquatting)",
-    "thresholds": {
-      "high": 0.8,
-      "medium": 0.6
-    }
-  },
-  "NoOfLettersInURL": {
-    "importance": 0.05622416930333308,
-    "category": "UNKNOWN",
-    "description": "Total letter count in URL",
-    "thresholds": {}
-  },
   "NoOfSubDomain": {
-    "importance": 0.05292017077049949,
+    "importance": 0.3075525883305423,
     "category": "URL_STRUCTURE",
     "description": "Excessive subdomain nesting (e.g. login.bank.evil.com)",
     "thresholds": {
@@ -83,32 +8,62 @@
       "medium": 2
     }
   },
-  "NoOfEqualsInURL": {
-    "importance": 0.004773335732639883,
-    "category": "UNKNOWN",
-    "description": "Multiple query parameter assignments",
+  "URLCharProb": {
+    "importance": 0.1324786561038684,
+    "category": "URL_STRUCTURE",
+    "description": "Unusual character distribution in URL string",
     "thresholds": {}
   },
-  "NoOfQMarkInURL": {
-    "importance": 0.004079633961977876,
+  "TLDLegitimateProb": {
+    "importance": 0.12887454812753135,
+    "category": "URL_STRUCTURE",
+    "description": "Top-level domain is associated with low-trust registrars",
+    "thresholds": {
+      "high": 0.3,
+      "medium": 0.5
+    }
+  },
+  "SpacialCharRatioInURL": {
+    "importance": 0.12882457707719241,
     "category": "UNKNOWN",
-    "description": "Query string is present",
+    "description": "High special character density",
     "thresholds": {}
   },
-  "NoOfOtherSpecialCharsInURL": {
-    "importance": 0.002811569903512199,
-    "category": "UNKNOWN",
-    "description": "Excessive special characters in URL",
+  "CharContinuationRate": {
+    "importance": 0.10276000895175716,
+    "category": "URL_STRUCTURE",
+    "description": "Unusual character continuation patterns in URL",
     "thresholds": {}
   },
-  "NoOfAmpersandInURL": {
-    "importance": 0.00019576798505795603,
+  "LetterRatioInURL": {
+    "importance": 0.07987725012921934,
     "category": "UNKNOWN",
-    "description": "Multiple query parameters chained",
+    "description": "Ratio of letters to total URL length",
+    "thresholds": {}
+  },
+  "DegitRatioInURL": {
+    "importance": 0.06194700740626837,
+    "category": "UNKNOWN",
+    "description": "Unusually high digit ratio in URL",
+    "thresholds": {}
+  },
+  "URLSimilarityIndex": {
+    "importance": 0.05541863844670212,
+    "category": "URL_STRUCTURE",
+    "description": "Domain/path resembles a known brand (typosquatting)",
+    "thresholds": {
+      "high": 0.8,
+      "medium": 0.6
+    }
+  },
+  "HasObfuscation": {
+    "importance": 0.0011358009170108437,
+    "category": "URL_STRUCTURE",
+    "description": "URL contains percent-encoded obfuscated characters",
     "thresholds": {}
   },
   "ObfuscationRatio": {
-    "importance": 7.477636715306197e-05,
+    "importance": 0.0009501621285312856,
     "category": "UNKNOWN",
     "description": "High proportion of obfuscated characters",
     "thresholds": {
@@ -117,25 +72,10 @@
     }
   },
   "IsDomainIP": {
-    "importance": 3.531062738347896e-05,
+    "importance": 0.0001807623813764686,
     "category": "URL_STRUCTURE",
     "description": "Uses raw IP address instead of a domain name",
     "thresholds": {}
-  },
-  "HasObfuscation": {
-    "importance": 1.2873440747834729e-05,
-    "category": "URL_STRUCTURE",
-    "description": "URL contains percent-encoded obfuscated characters",
-    "thresholds": {}
-  },
-  "NoOfObfuscatedChar": {
-    "importance": 1.2281668169526987e-05,
-    "category": "URL_STRUCTURE",
-    "description": "Multiple obfuscated characters found in URL",
-    "thresholds": {
-      "high": 5,
-      "medium": 2
-    }
   },
   "IsHTTPS": {
     "importance": 0.0,

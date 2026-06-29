@@ -69,6 +69,72 @@ are the v4 12-feature model. `phishing-extension/assets/phishing_model.json` is 
 
 ---
 
+## June 29, 2026 — v5: hybrid reputation + ML (SHIPPED FIX)
+
+**User decision:** add a real top-sites list. Implemented as a two-tier hybrid.
+
+**Why a hybrid:** experiments proved a URL-only lexical model CANNOT distinguish a
+popular legitimate bare domain (`google.com`) from phishing on a reputable TLD
+(`someshop.com`, `*.web.app`) — the signal isn't in the URL string. Whichever feature
+the model latched onto (DomainLength → URLSimilarityIndex → NoOfSubDomain) put real
+homepages on the phishing side. The fix is reputation, exactly as real products do.
+
+**Architecture:**
+1. **Training data overhauled** (`train.py`): LEGITIMATE class is now real top-sites
+   (Cisco Umbrella top-1m, `datasets/top-1m.csv`), structure-augmented to match the
+   phishing distribution; PHISHING class is PhiUSIIL phishing URLs. This replaces
+   PhiUSIIL's biased obscure-long-domain legit class.
+2. **Feature set v4** (`feature_config.py`): 12 scale-invariant features (dropped raw
+   length/count features that encoded the population bias).
+3. **Typosquat fix** (`lexical_extractor.py` + `feature-extractor.ts`): `URLSimilarityIndex`
+   now only fires on HIGH similarity (≥0.6) — genuine typosquats (paypa1, g00gle), not
+   coincidental distance (github~google). Applied identically in Python & TS (parity kept).
+4. **Reputation allowlist** (`phishing-extension/assets/top_domains.json`, 30k registrable
+   domains, 456 KB): `background/index.ts` short-circuits known-popular domains to CLEAN
+   before ML. Shared-hosting platforms (web.app, firebaseapp.com, github.io, …) are
+   EXCLUDED from the allowlist so platform-hosted phishing still goes to ML. Bundled
+   on-device → still privacy-preserving.
+
+**Validated hybrid (simulated end-to-end, allowlist + ML on built assets):**
+* LEGIT (google, github, wikipedia, paypal, stackoverflow, cnn, bbc, moonpay, wiki article): **9/9 CLEAN**.
+* PHISHING (secure-paypal-login.tk, paypa1-…gq, 192.168.1.1, liuy-…web.app, …weeblysite.com, g00gle-verify.tk): **6/6 flagged** (5 PHISHING, 1 SUSPICIOUS).
+* Python↔TS inference parity still exact (cross_validate_ts.mjs ALL PASS).
+* ML tier alone: held-out Accuracy 89.6%, the realistic number for URL-only on unknown domains.
+
+**Known residual limitation:** an UNKNOWN legitimate domain NOT in the top-30k allowlist
+(e.g. a small local business site) may be over-flagged by the ML tier. Mitigations:
+enlarge the allowlist, or add an online reputation lookup. Documented, not a blocker.
+
+**Re-export/build done:** `phishing_model.json` (12-feat), `shap_mapping.json` (12),
+`top_domains.json` rebuilt; `pnpm build` succeeds. **User must reload the unpacked
+extension in Chrome to pick up the new build.**
+
+---
+
+## June 29, 2026 — Popup UI redesign (`popup.tsx`)
+
+Full rework via the uidesigner skill. Reframed the popup as a **security "detector
+readout"** instead of generic stacked cards.
+* **Shows the domain under inspection** (mono, in the hero) — previously the popup never
+  displayed which site it judged. This was the biggest usability gap.
+* **Signature element:** dark instrument-panel hero (ink `#0d1014`) with the domain, verdict
+  word, animated count-up risk %, and a scanning risk meter that glows in the verdict colour
+  with threshold ticks at 50/85.
+* **Decision-source chip** ("Trusted-sites list" vs "On-device model") surfaces the v5 hybrid
+  architecture — the product's defining truth.
+* **Reputation verdicts** get an honest dedicated explanation ("on PhishGuard's trusted-sites
+  list, cleared without sending anything to the model") instead of empty ML cards.
+* **Removed the buggy ↑/↓ SHAP arrows** (they asserted wrong directions). ML signals now show
+  an honest **importance weight bar** + value, with a caption clarifying bars show weight, not
+  per-site direction. Resolves the long-standing SHAP-direction cosmetic bug.
+* Copy made blunt/honest: "Likely phishing" (it doesn't block), "Safe to use", "Be cautious".
+* Design system: mono "readout" voice for data (domain/score/signals), Segoe humanist for
+  prose; verdict colour is the only chroma, red reserved for phishing; designed loading +
+  empty states; hover/focus states on all interactive elements; no external fonts (MV3-CSP safe).
+* `npx tsc --noEmit` clean; `pnpm build` succeeds.
+
+---
+
 ## 1. Core Logic & Bug Fixes
 
 ### 🛠️ SHAP Explanation Bug Fixes
