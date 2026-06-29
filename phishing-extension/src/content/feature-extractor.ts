@@ -43,12 +43,6 @@ const EXPECTED_CHAR_FREQ: Record<string, number> = {
 /** Special character set — matches Python: '!@#$%^*()[]{}|;:<>' */
 const SPECIAL_CHARS = new Set("!@#$%^*()[]{}|;:<>".split(""));
 
-/** Social network domains — matches Python content_extractor.py */
-const SOCIAL_PATTERNS = [
-  "facebook.com", "twitter.com", "linkedin.com",
-  "instagram.com", "youtube.com",
-];
-
 // ---------------------------------------------------------------------------
 // Helper functions — ported 1:1 from Python lexical_extractor.py
 // ---------------------------------------------------------------------------
@@ -89,6 +83,10 @@ function levenshtein(a: string, b: string): number {
  */
 function computeBrandSimilarity(domainSld: string, url: string): number {
   // --- Domain portion: skip exact matches (it IS the real brand) ---
+  // Only HIGH similarity counts as typosquatting (e.g. paypa1~paypal, g00gle~google).
+  // Coincidental moderate distance (github~google ≈ 0.33) is NOT typosquatting and
+  // must score 0, or legitimate non-brand domains get flagged. Matches Python.
+  const TYPO_THRESHOLD = 0.6;
   let domainMaxSim = 0.0;
   for (const brand of BRANDS) {
     if (domainSld === brand) {
@@ -99,6 +97,7 @@ function computeBrandSimilarity(domainSld: string, url: string): number {
     const sim = 1 - dist / Math.max(domainSld.length, brand.length);
     if (sim > domainMaxSim) domainMaxSim = sim;
   }
+  if (domainMaxSim < TYPO_THRESHOLD) domainMaxSim = 0.0;
 
   // --- Path portion: exact match here IS suspicious ---
   let pathMaxSim = 0.0;
@@ -217,7 +216,7 @@ function countSubdomains(hostname: string): number {
 // Main extractor — produces all 44 features in canonical index order
 // ---------------------------------------------------------------------------
 
-export function extractPageFeatures(url: string, html: string): FeatureVector {
+export function extractPageFeatures(url: string, _html?: string): FeatureVector {
   // -------------------------------------------------------------------------
   // URL NORMALISATION — matches Python lexical_extractor.py lines 18-23
   // -------------------------------------------------------------------------
@@ -321,193 +320,11 @@ export function extractPageFeatures(url: string, html: string): FeatureVector {
   const IsHTTPS = parsed.protocol === "https:" ? 1 : 0;
 
   // =========================================================================
-  // GROUP B: DOMAIN FEATURES (indices 21–30) — from DOM
-  // =========================================================================
-
-  // Parse HTML for DOM queries
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
-
-  // [21] DomainAgeBucket — HARDCODE=0 per PRD. WHOIS not available in browser.
-  const DomainAgeBucket = 0;
-
-  // [22] HasTitle — page has <title> tag with non-empty text
-  const titleEl = doc.querySelector("title");
-  const titleText = titleEl?.textContent?.trim() || "";
-  const HasTitle = titleText ? 1 : 0;
-
-  // [23] DomainTitleMatchScore — domain SLD appears in page title
-  let DomainTitleMatchScore = 0.0;
-  if (titleText && domainSld) {
-    DomainTitleMatchScore = titleText.toLowerCase().includes(domainSld)
-      ? 1.0
-      : 0.0;
-  }
-
-  // [24] URLTitleMatchScore — ratio of URL path segments found in title
-  let URLTitleMatchScore = 0.0;
-  const pathParts = parsed.pathname
-    .split("/")
-    .filter((p) => p.length > 3)
-    .map((p) => p.toLowerCase());
-  if (titleText && pathParts.length > 0) {
-    const titleLower = titleText.toLowerCase();
-    const matches = pathParts.filter((p) => titleLower.includes(p)).length;
-    URLTitleMatchScore = matches / pathParts.length;
-  }
-
-  // [25] HasFavicon — <link rel="...icon..."> present
-  const HasFavicon = doc.querySelector('link[rel*="icon"]') ? 1 : 0;
-
-  // [26] Robots — <meta name="robots"> present (case-insensitive)
-  const Robots = doc.querySelector('meta[name="robots" i]')
-    ? 1
-    : doc.querySelector("meta[name]") &&
-        Array.from(doc.querySelectorAll("meta[name]")).some(
-          (m) => (m as HTMLMetaElement).name.toLowerCase() === "robots"
-        )
-      ? 1
-      : 0;
-
-  // [27] IsResponsive — <meta name="viewport"> present (case-insensitive)
-  const IsResponsive = doc.querySelector('meta[name="viewport" i]')
-    ? 1
-    : doc.querySelector("meta[name]") &&
-        Array.from(doc.querySelectorAll("meta[name]")).some(
-          (m) => (m as HTMLMetaElement).name.toLowerCase() === "viewport"
-        )
-      ? 1
-      : 0;
-
-  // [28] NoOfURLRedirect — not available in content script. Default 0.
-  const NoOfURLRedirect = 0;
-
-  // [29] NoOfSelfRedirect — not available in content script. Default 0.
-  const NoOfSelfRedirect = 0;
-
-  // [30] HasDescription — <meta name="description"> present (case-insensitive)
-  let HasDescription = 0;
-  const metaTags = Array.from(doc.querySelectorAll("meta[name]"));
-  for (let i = 0; i < metaTags.length; i++) {
-    const m = metaTags[i] as HTMLMetaElement;
-    if (m.name.toLowerCase() === "description") {
-      const content = m.content?.trim();
-      HasDescription = content ? 1 : 0;
-      break;
-    }
-  }
-
-  // =========================================================================
-  // GROUP C: CONTENT FEATURES (indices 31–43) — from HTML content
-  // =========================================================================
-
-  const lines = html.split("\n");
-
-  // [31] LineOfCode — number of HTML lines
-  const LineOfCode = lines.length;
-
-  // [32] LargestLineLength — max line length
-  const LargestLineLength =
-    lines.length > 0 ? Math.max(...lines.map((l) => l.length)) : 0;
-
-  // [33] NoOfPopup — count of window.open() calls in <script> tags
-  let NoOfPopup = 0;
-  const scripts = doc.querySelectorAll("script");
-  scripts.forEach((s) => {
-    const content = s.textContent || "";
-    if (content.includes("window.open")) NoOfPopup++;
-  });
-
-  // [34] NoOfiFrame — count of <iframe> elements
-  const NoOfiFrame = doc.querySelectorAll("iframe").length;
-
-  // [35] HasExternalFormSubmit — form action points to external domain
-  let HasExternalFormSubmit = 0;
-  const forms = Array.from(doc.querySelectorAll("form"));
-  for (let i = 0; i < forms.length; i++) {
-    const action = forms[i].getAttribute("action") || "";
-    if (action.startsWith("http") && !action.startsWith(url)) {
-      // More precise: check if the action domain differs from current domain
-      try {
-        const actionHost = new URL(action).hostname;
-        if (actionHost !== hostname) {
-          HasExternalFormSubmit = 1;
-          break;
-        }
-      } catch {
-        // If action URL is malformed but starts with http, flag it
-        HasExternalFormSubmit = 1;
-        break;
-      }
-    }
-  }
-
-  // [36] HasSocialNet — links to major social networks
-  let HasSocialNet = 0;
-  const links = Array.from(doc.querySelectorAll("a[href]"));
-  for (let i = 0; i < links.length; i++) {
-    const href = links[i].getAttribute("href") || "";
-    if (SOCIAL_PATTERNS.some((s) => href.includes(s))) {
-      HasSocialNet = 1;
-      break;
-    }
-  }
-
-  // [37] HasSubmitButton — <input type="submit"> or <button type="submit">
-  const HasSubmitButton =
-    doc.querySelector('input[type="submit"]') ||
-    doc.querySelector('button[type="submit"]')
-      ? 1
-      : 0;
-
-  // [38] HasHiddenFields — <input type="hidden">
-  const HasHiddenFields = doc.querySelector('input[type="hidden"]') ? 1 : 0;
-
-  // [39] HasPasswordField — <input type="password">
-  const HasPasswordField = doc.querySelector('input[type="password"]') ? 1 : 0;
-
-  // Get all visible text for keyword matching — matches Python soup.get_text().lower()
-  const bodyText = (doc.body?.innerText || doc.body?.textContent || "").toLowerCase();
-
-  // [40] Bank — text contains banking keywords
-  // Python: ['bank', 'banking', 'account number']
-  const Bank =
-    bodyText.includes("bank") ||
-    bodyText.includes("banking") ||
-    bodyText.includes("account number")
-      ? 1
-      : 0;
-
-  // [41] Pay — text contains payment keywords
-  // Python: ['payment', 'paypal', 'checkout', 'credit card']
-  const Pay =
-    bodyText.includes("payment") ||
-    bodyText.includes("paypal") ||
-    bodyText.includes("checkout") ||
-    bodyText.includes("credit card")
-      ? 1
-      : 0;
-
-  // [42] Crypto — text contains crypto keywords
-  // Python: ['bitcoin', 'crypto', 'wallet', 'blockchain']
-  const Crypto =
-    bodyText.includes("bitcoin") ||
-    bodyText.includes("crypto") ||
-    bodyText.includes("wallet") ||
-    bodyText.includes("blockchain")
-      ? 1
-      : 0;
-
-  // [43] HasCopyrightInfo — text contains 'copyright' or '©'
-  // Python: 'copyright' in text or '\u00a9' in text
-  const HasCopyrightInfo =
-    bodyText.includes("copyright") || bodyText.includes("\u00a9") ? 1 : 0;
-
-  // =========================================================================
-  // Return in canonical index order (indices 0–43)
+  // Return the 21 lexical features in canonical index order (0–20).
+  // DOM/content features (old indices 21–43) were removed in v3 to eliminate
+  // train/serve skew — see SOURCE_OF_TRUTH.md.
   // =========================================================================
   return {
-    // Group A: Lexical (0–20)
     URLLength,                    // 0
     DomainLength,                 // 1
     IsDomainIP,                   // 2
@@ -529,30 +346,5 @@ export function extractPageFeatures(url: string, html: string): FeatureVector {
     NoOfOtherSpecialCharsInURL,   // 18
     SpacialCharRatioInURL,        // 19
     IsHTTPS,                      // 20
-    // Group B: Domain (21–30)
-    DomainAgeBucket,              // 21
-    HasTitle,                     // 22
-    DomainTitleMatchScore,        // 23
-    URLTitleMatchScore,           // 24
-    HasFavicon,                   // 25
-    Robots,                       // 26
-    IsResponsive,                 // 27
-    NoOfURLRedirect,              // 28
-    NoOfSelfRedirect,             // 29
-    HasDescription,               // 30
-    // Group C: Content (31–43)
-    LineOfCode,                   // 31
-    LargestLineLength,            // 32
-    NoOfPopup,                    // 33
-    NoOfiFrame,                   // 34
-    HasExternalFormSubmit,         // 35
-    HasSocialNet,                 // 36
-    HasSubmitButton,              // 37
-    HasHiddenFields,              // 38
-    HasPasswordField,             // 39
-    Bank,                         // 40
-    Pay,                          // 41
-    Crypto,                       // 42
-    HasCopyrightInfo,             // 43
   };
 }

@@ -81,6 +81,10 @@ def compute_brand_similarity(domain: str, url: str = '') -> float:
     domain_sld = ext.domain.lower()  # second-level domain only
 
     # --- Domain portion: skip exact matches (it IS the real brand) ---
+    # Only HIGH similarity counts as typosquatting (e.g. paypa1~paypal, g00gle~google).
+    # Coincidental moderate distance (github~google ≈ 0.33) is NOT typosquatting and
+    # must score 0, or legitimate non-brand domains get flagged.
+    TYPO_THRESHOLD = 0.6
     domain_max_sim = 0.0
     for brand in BRANDS:
         if domain_sld == brand:
@@ -91,6 +95,8 @@ def compute_brand_similarity(domain: str, url: str = '') -> float:
         sim = 1 - (dist / max(len(domain_sld), len(brand)))
         if sim > domain_max_sim:
             domain_max_sim = sim
+    if domain_max_sim < TYPO_THRESHOLD:
+        domain_max_sim = 0.0
 
     # --- Path portion: exact match here IS suspicious ---
     path_max_sim = 0.0

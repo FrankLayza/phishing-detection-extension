@@ -34,156 +34,227 @@ from features.lexical_extractor import extract_lexical_features
 
 def augment_legitimate_urls(phi, random_state=42):
     """
-    Legitimate URLs in PhiUSIIL contain absolutely no paths and no subdomains other
-    than 'www.'. This creates a major bias where the model learns that any URL with
-    a path or non-www subdomain is phishing.
-    This function randomly augments legitimate URLs in the dataset by adding realistic
-    subdomains and paths, forcing the model to learn lexical patterns instead of relying
-    on these biases.
+    Decorrelate URL *structure* (path / subdomain presence) from the label.
+
+    In PhiUSIIL, 100% of legitimate URLs are bare domains (no path, no non-www
+    subdomain), while ~27% of phishing URLs have a path and ~45% have a
+    subdomain. A URL-only model therefore learns the *artifact* "has path or
+    subdomain => legit / bare domain => phishing" (or its inverse), which makes
+    it flag real homepages like https://google.com/ as phishing.
+
+    Fix: bring the legitimate distribution UP to match the phishing distribution
+    so structure carries no class information. The model is then forced to rely
+    on genuine lexical content signals (typosquatting / URLSimilarityIndex, TLD
+    legitimacy, obfuscation, digit and special-char statistics). We augment only
+    the legitimate class because the phishing URLs already carry these structures
+    naturally and we must not fabricate phishing examples.
     """
+    # Target rates measured from the phishing class in this dataset.
+    TARGET_PATH = 0.27
+    TARGET_SUB = 0.45
+
     rng = np.random.RandomState(random_state)
-    legit_indices = phi[phi['label'] == 1].index.values
-    
+    legit_indices = phi[phi['label'] == 1].index.values  # label 1 = legitimate (pre-inversion)
+
     subdomains = ['docs', 'en', 'mail', 'blog', 'support', 'login', 'store', 'app', 'dev', 'status', 'news', 'portal', 'api', 'admin', 'accounts']
     paths = [
-        '/index.html', '/login', '/register', '/home', '/about', '/contact', '/faq', 
+        '/index.html', '/login', '/register', '/home', '/about', '/contact', '/faq',
         '/terms', '/privacy', '/products', '/item/12345', '/search', '/posts/hello-world',
         '/docs/api/v1', '/settings/profile', '/download', '/pricing', '/blog/news/2026/06',
         '/dp/b08n5wrwnw', '/3/library/os.html', '/wiki/phishing', '/signin', '/watch?v=dqw4w9wgxcq'
     ]
-    
-    print("Augmenting legitimate URLs to reduce path/subdomain bias...")
-    
-    modified_count = 0
+
+    print("Augmenting legitimate URLs to MATCH phishing structure distribution")
+    print(f"  (target: {TARGET_SUB:.0%} subdomain, {TARGET_PATH:.0%} path — decorrelates structure from label)")
+
     subdomain_count = 0
     path_count = 0
-    both_count = 0
-    
     urls = phi['URL'].values.copy()
-    
+
     for idx in legit_indices:
         url = str(urls[idx])
-        # 40% unmodified, 30% path only, 20% subdomain only, 10% both
-        mod_type = rng.choice([0, 1, 2, 3], p=[0.4, 0.3, 0.2, 0.1])
-        
-        if mod_type == 0:
-            continue
-            
-        modified_count += 1
-        
-        # Add subdomain
-        if mod_type in [2, 3]:
+        # Independent draws so the marginal path/subdomain rates match phishing's.
+        if rng.random() < TARGET_SUB:
             sub = rng.choice(subdomains)
             if '://www.' in url:
                 url = url.replace('://www.', f'://{sub}.')
             elif '://' in url:
                 url = url.replace('://', f'://{sub}.')
             subdomain_count += 1
-            
-        # Add path
-        if mod_type in [1, 3]:
-            path = rng.choice(paths)
-            url = url.rstrip('/') + path
+        if rng.random() < TARGET_PATH:
+            url = url.rstrip('/') + rng.choice(paths)
             path_count += 1
-            
-        if mod_type == 3:
-            both_count += 1
-            
         urls[idx] = url
-        
+
     phi['URL'] = urls
-    print(f"  Total legitimate URLs modified: {modified_count} / {len(legit_indices)}")
-    print(f"    Added path: {path_count}")
-    print(f"    Added subdomain: {subdomain_count}")
-    print(f"    Added both: {both_count}")
+    n = len(legit_indices)
+    print(f"  Legit URLs given a subdomain: {subdomain_count}/{n} ({subdomain_count/n:.0%})")
+    print(f"  Legit URLs given a path:      {path_count}/{n} ({path_count/n:.0%})")
     return phi
+
+
+# Curated popular, indisputably-legitimate domains across categories. PhiUSIIL's
+# legitimate class is dominated by obscure long-named sites, so the model learns
+# "short domain => phishing". Injecting these short, famous domains as legitimate
+# examples corrects that population bias so real homepages aren't flagged.
+POPULAR_LEGIT_DOMAINS = [
+    # Tech / search / social
+    'google.com', 'youtube.com', 'facebook.com', 'instagram.com', 'twitter.com', 'x.com',
+    'linkedin.com', 'reddit.com', 'pinterest.com', 'tiktok.com', 'snapchat.com', 'whatsapp.com',
+    'telegram.org', 'discord.com', 'twitch.tv', 'tumblr.com', 'quora.com', 'medium.com',
+    'microsoft.com', 'apple.com', 'amazon.com', 'netflix.com', 'spotify.com', 'adobe.com',
+    'oracle.com', 'ibm.com', 'intel.com', 'nvidia.com', 'amd.com', 'dell.com', 'hp.com',
+    'samsung.com', 'sony.com', 'cisco.com', 'salesforce.com', 'sap.com', 'vmware.com',
+    'github.com', 'gitlab.com', 'bitbucket.org', 'stackoverflow.com', 'npmjs.com',
+    'docker.com', 'kubernetes.io', 'mozilla.org', 'wikipedia.org', 'wikimedia.org',
+    'cloudflare.com', 'digitalocean.com', 'heroku.com', 'vercel.com', 'netlify.com',
+    'zoom.us', 'slack.com', 'dropbox.com', 'box.com', 'notion.so', 'figma.com', 'canva.com',
+    'wordpress.com', 'wix.com', 'squarespace.com', 'shopify.com', 'godaddy.com',
+    # Shopping / payments / finance
+    'paypal.com', 'stripe.com', 'ebay.com', 'etsy.com', 'walmart.com', 'target.com',
+    'bestbuy.com', 'costco.com', 'alibaba.com', 'aliexpress.com', 'wayfair.com',
+    'visa.com', 'mastercard.com', 'americanexpress.com', 'chase.com', 'bankofamerica.com',
+    'wellsfargo.com', 'citibank.com', 'capitalone.com', 'hsbc.com', 'barclays.co.uk',
+    'coinbase.com', 'binance.com', 'kraken.com', 'moonpay.com', 'robinhood.com',
+    # News / media / reference
+    'bbc.com', 'bbc.co.uk', 'cnn.com', 'nytimes.com', 'theguardian.com', 'reuters.com',
+    'forbes.com', 'bloomberg.com', 'wsj.com', 'economist.com', 'time.com', 'nature.com',
+    'sciencedirect.com', 'jstor.org', 'arxiv.org', 'imdb.com', 'rottentomatoes.com',
+    'espn.com', 'nationalgeographic.com', 'weather.com', 'accuweather.com',
+    # Travel / services / misc
+    'booking.com', 'airbnb.com', 'expedia.com', 'tripadvisor.com', 'uber.com', 'lyft.com',
+    'doordash.com', 'grubhub.com', 'yelp.com', 'maps.google.com', 'gmail.com', 'outlook.com',
+    'yahoo.com', 'bing.com', 'duckduckgo.com', 'baidu.com', 'yandex.com', 'naver.com',
+    # Education / government / orgs
+    'mit.edu', 'harvard.edu', 'stanford.edu', 'berkeley.edu', 'ox.ac.uk', 'cam.ac.uk',
+    'coursera.org', 'edx.org', 'khanacademy.org', 'udemy.com', 'usa.gov', 'irs.gov',
+    'nih.gov', 'cdc.gov', 'nasa.gov', 'who.int', 'un.org', 'europa.eu', 'gov.uk',
+    'redcross.org', 'wikipedia.org', 'archive.org', 'ietf.org', 'w3.org',
+    # Nigeria / Africa context (deployment region)
+    'gtbank.com', 'firstbanknigeria.com', 'accessbankplc.com', 'zenithbank.com',
+    'jumia.com.ng', 'konga.com', 'nairaland.com', 'flutterwave.com', 'paystack.com',
+]
+
+
+def inject_popular_legit(phi, random_state=42, variants_per_domain=12):
+    """
+    Append popular, well-known legitimate domains to the dataset as legitimate
+    examples (label=1, pre-inversion). For each domain we add several variants —
+    bare, www, and structure-matched path/subdomain forms — so the model learns
+    that short, common-TLD brand domains are legitimate regardless of structure.
+    """
+    rng = np.random.RandomState(random_state)
+    subdomains = ['www', 'app', 'login', 'account', 'my', 'secure', 'shop', 'help', 'support', 'en']
+    paths = ['', '/', '/home', '/login', '/account', '/about', '/products', '/help',
+             '/search?q=test', '/p/12345', '/signin', '/dashboard']
+
+    rows = []
+    for dom in POPULAR_LEGIT_DOMAINS:
+        for _ in range(variants_per_domain):
+            scheme = 'https://'
+            host = dom
+            if rng.random() < 0.45:
+                host = rng.choice(subdomains) + '.' + dom
+            path = rng.choice(paths) if rng.random() < 0.27 else ''
+            rows.append({'URL': scheme + host + path, 'label': 1})
+
+    inj = pd.DataFrame(rows)
+    print(f"  Injecting {len(inj)} popular-legit URL variants "
+          f"({len(POPULAR_LEGIT_DOMAINS)} domains x {variants_per_domain})")
+    # Align columns with phi (other feature columns are unused for lexical-only)
+    phi = pd.concat([phi, inj], ignore_index=True)
+    return phi
+
+
+TOP_SITES_PATH = 'datasets/top-1m.csv'
+N_LEGIT = 110000  # number of top-sites domains to use as the legitimate class
+
+
+def build_legit_urls_from_top_sites(n=N_LEGIT, random_state=42):
+    """
+    Build legitimate URLs from a real top-sites list (Cisco Umbrella top-1m).
+
+    This REPLACES PhiUSIIL's legitimate class, which is biased toward obscure,
+    long-named, bare domains and causes the model to flag real popular homepages.
+    Top-sites domains are genuine, popular, mostly short-domain sites — the
+    population the extension actually encounters.
+
+    Each domain is emitted with structure (path / subdomain) matching the phishing
+    class distribution (~27% path, ~45% subdomain) so URL *structure* carries no
+    class information and the model must rely on genuine content signals.
+    """
+    rng = np.random.RandomState(random_state)
+    top = pd.read_csv(TOP_SITES_PATH, header=None, names=['rank', 'domain'])
+    domains = top['domain'].dropna().astype(str).head(n).tolist()
+
+    subdomains = ['app', 'login', 'account', 'my', 'secure', 'shop', 'help',
+                  'support', 'en', 'mail', 'portal', 'dev', 'news', 'store']
+    paths = ['/home', '/login', '/account', '/about', '/products', '/help',
+             '/search?q=test', '/p/12345', '/signin', '/dashboard', '/contact',
+             '/pricing', '/terms', '/privacy', '/index.html']
+
+    urls = []
+    for d in domains:
+        d = d.strip().lower()
+        if not d or '.' not in d:
+            continue
+        host = d
+        if not host.startswith('www.') and rng.random() < 0.45:
+            host = rng.choice(subdomains) + '.' + host
+        path = rng.choice(paths) if rng.random() < 0.27 else ''
+        urls.append('https://' + host + path)
+    print(f"  Top-sites legitimate URLs: {len(urls)} (from top {n} domains)")
+    return urls
 
 
 def load_and_prepare_dataset():
     """
-    Load PhiUSIIL dataset and build feature matrix with SELF-EXTRACTED
-    lexical features + CSV-sourced content/domain features.
+    Build the training matrix from:
+      - LEGITIMATE class: real top-sites domains (Cisco Umbrella top-1m),
+        structure-augmented to match the phishing distribution.
+      - PHISHING class:    PhiUSIIL phishing URLs (raw label == 0).
+    Lexical features are SELF-EXTRACTED with the same function used at inference,
+    guaranteeing train/serve parity. Labels: 1 = phishing, 0 = legitimate.
     """
-    print("Loading PhiUSIIL dataset...")
+    print("Loading PhiUSIIL (phishing class) + top-sites (legitimate class)...")
     phi = pd.read_csv('datasets/phiusiil.csv')
-    print(f"  Raw rows: {len(phi)}")
-
-    # Ensure we have the URL column and label
-    if 'URL' not in phi.columns:
-        raise ValueError("PhiUSIIL CSV must have a 'URL' column")
-    if 'label' not in phi.columns:
-        raise ValueError("PhiUSIIL CSV must have a 'label' column")
-
-    # Drop rows with missing URLs
     phi = phi.dropna(subset=['URL'])
     phi = phi[phi['URL'].str.strip().astype(bool)]
-    print(f"  After dropping empty URLs: {len(phi)}")
+    # PhiUSIIL raw encoding: 1 = legitimate, 0 = phishing. Keep only phishing.
+    phish_urls = phi[phi['label'] == 0]['URL'].astype(str).tolist()
+    print(f"  PhiUSIIL phishing URLs: {len(phish_urls)}")
 
-    # Augment legitimate URLs to break path/subdomain dataset bias
-    phi = augment_legitimate_urls(phi)
+    legit_urls = build_legit_urls_from_top_sites()
+
+    urls = phish_urls + legit_urls
+    y = np.array([1] * len(phish_urls) + [0] * len(legit_urls))  # 1=phish, 0=legit
 
     # ------------------------------------------------------------------
-    # STEP 1: Self-extract lexical features from raw URL strings
-    #         (same function used at inference time)
+    # Self-extract lexical features (same code path as the browser extractor)
     # ------------------------------------------------------------------
     print("\nExtracting lexical features from raw URLs...")
-    print("  (This ensures train-time features match inference-time features)")
-
     start = time.time()
     lexical_rows = []
     errors = 0
-    for i, url in enumerate(phi['URL']):
+    for i, url in enumerate(urls):
         try:
-            feats = extract_lexical_features(str(url))
-            lexical_rows.append(feats)
+            lexical_rows.append(extract_lexical_features(str(url)))
         except Exception:
-            # Use zeros for URLs that fail extraction
             lexical_rows.append({f: 0 for f in LEXICAL_FEATURES})
             errors += 1
-
         if (i + 1) % 50000 == 0:
-            elapsed = time.time() - start
-            rate = (i + 1) / elapsed
-            print(f"  Processed {i+1}/{len(phi)} URLs ({rate:.0f} URLs/sec, {errors} errors)")
+            print(f"  Processed {i+1}/{len(urls)} URLs ({errors} errors)")
+    print(f"  Done: {len(lexical_rows)} URLs in {time.time()-start:.1f}s ({errors} errors)")
 
-    elapsed = time.time() - start
-    print(f"  Done: {len(lexical_rows)} URLs in {elapsed:.1f}s ({errors} extraction errors)")
+    X = pd.DataFrame(lexical_rows)[ALL_FEATURES].copy().fillna(0)
 
-    lexical_df = pd.DataFrame(lexical_rows)
-
-    # ------------------------------------------------------------------
-    # STEP 2: Use PhiUSIIL's pre-computed content/domain features
-    #         (these columns exist in the CSV with matching names)
-    # ------------------------------------------------------------------
-    print("\nMapping content/domain features from CSV columns...")
-    content_domain_features = DOMAIN_FEATURES + CONTENT_FEATURES
-
-    for feat in content_domain_features:
-        if feat in phi.columns:
-            lexical_df[feat] = phi[feat].values
-        else:
-            print(f"  WARNING: '{feat}' not in CSV — defaulting to 0")
-            lexical_df[feat] = 0
-
-    # ------------------------------------------------------------------
-    # STEP 3: Assemble final feature matrix in correct order
-    # ------------------------------------------------------------------
-    X = lexical_df[ALL_FEATURES].copy()
-    y = phi['label'].values.copy()
-
-    # Convert labels to binary (0=legitimate, 1=phishing)
-    # PhiUSIIL dataset: 1=legitimate, 0=phishing, so we invert them.
-    y = np.array([0 if str(v).strip() in ['1', 'legitimate', 'good', 'safe'] else 1 for v in y])
-
-    # Fill any remaining NaN with 0
-    X = X.fillna(0)
-
-    # Neutralize biased IsHTTPS feature to prevent dataset bias
-    X['IsHTTPS'] = 1.0
+    # Neutralize IsHTTPS: legit are all https by construction; don't let scheme
+    # become a spurious signal (modern phishing uses https too).
+    if 'IsHTTPS' in X.columns:
+        X['IsHTTPS'] = 1.0
 
     print(f"\nFinal dataset: {X.shape[0]} samples, {X.shape[1]} features")
     print(f"  Class distribution: legitimate={np.sum(y==0)}, phishing={np.sum(y==1)}")
-
     return X, y
 
 
@@ -195,6 +266,12 @@ def augment_with_missing_content(X, y, fraction=0.3):
     """
     content_domain_cols = DOMAIN_FEATURES + CONTENT_FEATURES
     content_indices = [ALL_FEATURES.index(f) for f in content_domain_cols if f in ALL_FEATURES]
+
+    # v3 lexical-only: no content/domain features to zero out. Skip entirely —
+    # zeroing nothing and duplicating 30% of rows would only distort the set.
+    if not content_indices:
+        print("\nContent-zeroed augmentation: skipped (lexical-only feature set, no content features).")
+        return X, y
 
     n_augment = int(len(X) * fraction)
     rng = np.random.RandomState(42)

@@ -1,3 +1,9 @@
+/**
+ * v3 lexical-only feature set (21 URL-string features).
+ * DOM/content features were dropped to eliminate train/serve skew — these
+ * are self-extracted identically in Python and TypeScript for exact parity.
+ * See SOURCE_OF_TRUTH.md / feature_config.py.
+ */
 export interface FeatureVector {
   URLLength: number; DomainLength: number; IsDomainIP: number;
   URLSimilarityIndex: number; CharContinuationRate: number;
@@ -6,14 +12,7 @@ export interface FeatureVector {
   NoOfLettersInURL: number; LetterRatioInURL: number; NoOfDegitsInURL: number;
   DegitRatioInURL: number; NoOfEqualsInURL: number; NoOfQMarkInURL: number;
   NoOfAmpersandInURL: number; NoOfOtherSpecialCharsInURL: number;
-  SpacialCharRatioInURL: number; IsHTTPS: number; DomainAgeBucket: number;
-  HasTitle: number; DomainTitleMatchScore: number; URLTitleMatchScore: number;
-  HasFavicon: number; Robots: number; IsResponsive: number;
-  NoOfURLRedirect: number; NoOfSelfRedirect: number; HasDescription: number;
-  LineOfCode: number; LargestLineLength: number; NoOfPopup: number;
-  NoOfiFrame: number; HasExternalFormSubmit: number; HasSocialNet: number;
-  HasSubmitButton: number; HasHiddenFields: number; HasPasswordField: number;
-  Bank: number; Pay: number; Crypto: number; HasCopyrightInfo: number;
+  SpacialCharRatioInURL: number; IsHTTPS: number;
 }
 
 export type FeatureArray = Float32Array;
