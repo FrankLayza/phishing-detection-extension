@@ -77,15 +77,8 @@ def is_allowlisted(url: str) -> bool:
         import tldextract
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}".lower()
-        if allowlist and domain in allowlist:
+        if domain in allowlist:
             return True
-        # Also check last 2-3 labels (handles bbc.co.uk etc.)
-        host = url.split('//')[-1].split('/')[0].lower().replace('www.', '')
-        labels = host.split('.')
-        for take in range(2, min(4, len(labels) + 1)):
-            candidate = '.'.join(labels[-take:])
-            if candidate in allowlist:
-                return True
     except Exception:
         pass
     return False
