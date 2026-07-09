@@ -1,24 +1,23 @@
 """
-PhishGuard Detection Pipeline
-==============================
-Architecture (matches Consolidated_Implementation_Guide.md Section 1.2):
+PhishGuard Detection Pipeline (v2 - 12-feature lexical-only)
+=============================================================
+Architecture:
 
-  STEP 1: Local ML Model (Random Forest via ONNX-trained sklearn model)
-          - Extracts 44 lexical + content + domain features
-          - Fast, private, no network calls needed
+  STAGE 1: Cache (skipped in CLI tool)
 
-  STEP 2: Domain Age Check (whois)
-          - Newly registered domains (<1yr) are high-risk
+  STAGE 2: Reputation Allowlist
+           - Checks registrable domain against top-sites list
+           - Known-popular domains are short-circuited to CLEAN
 
-  STEP 3: Google Safe Browsing API fallback
-          - Only triggered when ML confidence is borderline (40-70%)
-          - Final authoritative verdict from Google's threat database
+  STAGE 3: On-device Random Forest (12 lexical features)
+           - Extracts scale-invariant URL-string features
+           - Fast, private, no network calls needed
 
-  STEP 4: Weighted Fusion + Verdict
-          - Combines all signals into a final risk score
+  STAGE 4: Google Safe Browsing fallback
+           - Only triggered when ML score is borderline (0.35-0.65)
+           - Set GSB_API_KEY in .env to enable
 
-Set your Google Safe Browsing API key below or in env var GSB_API_KEY.
-Get a free key at: https://developers.google.com/safe-browsing/v4/get-started
+Set your Google Safe Browsing API key in .env as GSB_API_KEY=your_key_here
 """
 
 import sys
@@ -27,7 +26,6 @@ import json
 import joblib
 import pandas as pd
 import requests
-import datetime
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -35,325 +33,234 @@ import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-GSB_API_KEY = os.environ.get('GSB_API_KEY', 'YOUR_GSB_API_KEY_HERE')
+GSB_API_KEY = os.environ.get('GSB_API_KEY', '')
 GSB_ENDPOINT = 'https://safebrowsing.googleapis.com/v4/threatMatches:find'
 
-# ML model is borderline if phishing probability is between these values
-BORDERLINE_LOW  = 0.50
-BORDERLINE_HIGH = 0.85
+# GSB fallback is triggered when ML score is in this borderline range
+BORDERLINE_LOW  = 0.35
+BORDERLINE_HIGH = 0.65
 
-# Weights for fusion
-WEIGHT_ML  = 0.65
-WEIGHT_GSB = 0.35
-
-# Add ml-pipeline to sys.path so we can import the features package
+# Add ml-pipeline to sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from features.feature_config import ALL_FEATURES, CONTENT_FEATURES
+from features.feature_config import ALL_FEATURES
 from features.lexical_extractor import extract_lexical_features
-from features.content_extractor import extract_content_features
 
 # --------------------------------------------------------------------------
-# Domain Age via WHOIS
+# Reputation Allowlist
 # --------------------------------------------------------------------------
-def get_domain_age_bucket(domain: str) -> int:
-    """
-    0 = unknown/error
-    1 = < 1 year (suspicious)
-    2 = 1–3 years
-    3 = > 3 years (trusted)
-    """
+_allowlist: set = None
+
+def load_allowlist() -> set:
+    global _allowlist
+    if _allowlist is not None:
+        return _allowlist
+    allowlist_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..', 'phishing-extension', 'assets', 'top_domains.json'
+    )
     try:
-        import whois
-        w = whois.whois(domain)
-        creation = w.creation_date
-        if isinstance(creation, list):
-            creation = creation[0]
-        if creation is None:
-            return 0
-        age_days = (datetime.datetime.now() - creation).days
-        if age_days < 365:
-            return 1
-        elif age_days < 1095:
-            return 2
-        else:
-            return 3
+        with open(allowlist_path, 'r') as f:
+            _allowlist = set(json.load(f))
+        print(f"         Allowlist loaded ({len(_allowlist):,} domains)")
+    except Exception as e:
+        print(f"         [WARNING] Could not load allowlist: {e}")
+        _allowlist = set()
+    return _allowlist
+
+def is_allowlisted(url: str) -> bool:
+    """True if the URL's registrable domain is a known-popular site."""
+    allowlist = load_allowlist()
+    if not allowlist:
+        return False
+    try:
+        import tldextract
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}".lower()
+        if allowlist and domain in allowlist:
+            return True
+        # Also check last 2-3 labels (handles bbc.co.uk etc.)
+        host = url.split('//')[-1].split('/')[0].lower().replace('www.', '')
+        labels = host.split('.')
+        for take in range(2, min(4, len(labels) + 1)):
+            candidate = '.'.join(labels[-take:])
+            if candidate in allowlist:
+                return True
     except Exception:
-        return 0
+        pass
+    return False
 
 # --------------------------------------------------------------------------
-# Google Safe Browsing API
+# Google Safe Browsing
 # --------------------------------------------------------------------------
-def check_google_safe_browsing(url: str) -> dict:
-    """
-    Returns:
-      {'is_phishing': bool, 'threat_type': str or None, 'available': bool}
-    """
-    if GSB_API_KEY == 'YOUR_GSB_API_KEY_HERE':
+def check_gsb(url: str) -> dict:
+    """Returns {'is_phishing': bool, 'threat_type': str|None, 'available': bool}"""
+    if not GSB_API_KEY:
         return {'is_phishing': False, 'threat_type': None, 'available': False}
 
     payload = {
-        "client": {"clientId": "phishguard", "clientVersion": "1.0"},
+        "client": {"clientId": "phishguard", "clientVersion": "2.0"},
         "threatInfo": {
-            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
             "platformTypes": ["ANY_PLATFORM"],
             "threatEntryTypes": ["URL"],
             "threatEntries": [{"url": url}]
         }
     }
-
     try:
-        resp = requests.post(
-            f"{GSB_ENDPOINT}?key={GSB_API_KEY}",
-            json=payload,
-            timeout=5
-        )
+        resp = requests.post(f"{GSB_ENDPOINT}?key={GSB_API_KEY}", json=payload, timeout=5)
         resp.raise_for_status()
-        data = resp.json()
-        matches = data.get('matches', [])
+        matches = resp.json().get('matches', [])
         if matches:
-            threat_type = matches[0].get('threatType', 'UNKNOWN')
-            return {'is_phishing': True, 'threat_type': threat_type, 'available': True}
+            return {'is_phishing': True, 'threat_type': matches[0].get('threatType'), 'available': True}
         return {'is_phishing': False, 'threat_type': None, 'available': True}
     except Exception as e:
         return {'is_phishing': False, 'threat_type': None, 'available': False}
 
 # --------------------------------------------------------------------------
-# Unreachable page defaults (absence of legitimacy)
-# --------------------------------------------------------------------------
-UNREACHABLE_DEFAULTS = {f: 0 for f in CONTENT_FEATURES}
-UNREACHABLE_DEFAULTS.update({
-    'HasTitle': 0, 'HasDescription': 0, 'HasFavicon': 0,
-    'IsResponsive': 0, 'Robots': 0, 'DomainTitleMatchScore': 0.0,
-    'URLTitleMatchScore': 0.0, 'NoOfURLRedirect': 0, 'NoOfSelfRedirect': 0,
-    'DomainAgeBucket': 0,
-})
-
-# --------------------------------------------------------------------------
 # Main detection pipeline
 # --------------------------------------------------------------------------
-def detect(url: str, verbose: bool = True, audit: bool = False) -> dict:
-    def log(msg): 
-        if verbose: print(msg)
+def detect(url: str, audit: bool = False) -> dict:
+    print(f"\n{'='*60}")
+    print(f"  PhishGuard Detection Pipeline")
+    print(f"  URL: {url}")
+    print(f"{'='*60}")
 
-    log(f"\n{'='*60}")
-    log(f"  PhishGuard Detection Pipeline")
-    log(f"  URL: {url}")
-    log(f"{'='*60}")
-
-    fetch_url = url if url.startswith(('http://', 'https://')) else 'http://' + url
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
 
     # ------------------------------------------------------------------
-    # STEP 1: Feature Extraction
+    # STAGE 2: Reputation Allowlist
     # ------------------------------------------------------------------
-    log("\n[STEP 1] Extracting lexical features from URL string...")
-    lexical_features = extract_lexical_features(url)
-
-    html_features = {}
-    page_unreachable = False
-    response = None
-
-    log("[STEP 1] Fetching live page content (timeout=7s)...")
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(fetch_url, timeout=7, headers=headers, allow_redirects=True)
-        html = response.text
-        log(f"         [OK] HTTP {response.status_code} - {len(html):,} chars, {len(response.history)} redirect(s)")
-        html_features = extract_content_features(html, fetch_url, response=response)
-    except requests.exceptions.ConnectionError:
-        log("         [WARNING] DNS resolution failed - domain is dead or doesn't exist.")
-        page_unreachable = True
-    except requests.exceptions.Timeout:
-        log("         [WARNING] Timeout - server not responding.")
-        page_unreachable = True
-    except Exception as e:
-        log(f"         [WARNING] Fetch failed: {type(e).__name__}")
-        page_unreachable = True
-
-    if page_unreachable:
-        log("         Using 'absence of legitimacy' defaults for content features.")
-        html_features = dict(UNREACHABLE_DEFAULTS)
+    print("\n[STAGE 2] Checking reputation allowlist...")
+    if is_allowlisted(url):
+        print(f"         [OK] Domain is on the trusted-sites allowlist")
+        print(f"\n{'='*60}")
+        print(f"  [VERDICT] CLEAN / SAFE")
+        print(f"  [VERDICT] Risk Score: 5.0%")
+        print(f"  [SOURCE]  Trusted-sites allowlist (on-device)")
+        print(f"{'='*60}\n")
+        return {
+            'url': url, 'is_phishing': False, 'final_score': 0.05,
+            'ml_score': None, 'source': 'ALLOWLIST'
+        }
+    print(f"         Domain not in allowlist — proceeding to ML model")
 
     # ------------------------------------------------------------------
-    # STEP 1b: Domain Age (WHOIS)
+    # STAGE 3: On-device ML (12 lexical features)
     # ------------------------------------------------------------------
-    import tldextract
-    ext = tldextract.extract(fetch_url)
-    domain = f"{ext.domain}.{ext.suffix}"
+    print("\n[STAGE 3] Extracting lexical features...")
+    lexical = extract_lexical_features(url)
 
-    log(f"[STEP 1] Checking domain age for '{domain}'...")
-    age_bucket = get_domain_age_bucket(domain)
-    html_features['DomainAgeBucket'] = age_bucket
-    age_labels = {0: 'Unknown', 1: '<1 year (suspicious)', 2: '1-3 years', 3: '>3 years (trusted)'}
-    log(f"         Domain age: {age_labels.get(age_bucket, 'Unknown')}")
+    # Build feature vector in canonical order
+    row = {f: lexical.get(f, 0) for f in ALL_FEATURES}
+    df = pd.DataFrame([row], columns=ALL_FEATURES)
 
-    # ------------------------------------------------------------------
-    # STEP 2: ML Inference
-    # ------------------------------------------------------------------
-    combined = {**lexical_features, **html_features}
-    for f in ALL_FEATURES:
-        if f not in combined:
-            combined[f] = 0
+    if audit:
+        print("\n  Feature values:")
+        for f in ALL_FEATURES:
+            print(f"    {f:<35} {row[f]}")
 
-    df = pd.DataFrame([combined], columns=ALL_FEATURES)
-
-    log("\n[STEP 2] Running ML inference (Random Forest)...")
+    print("\n[STAGE 3] Running Random Forest inference...")
     scaler = joblib.load('models/scaler.pkl')
     model  = joblib.load('models/random_forest.pkl')
 
-    X_scaled      = scaler.transform(df.values)
-    
-    # Fix for IsHTTPS which scales incorrectly due to training data bias
-    if 'IsHTTPS' in ALL_FEATURES:
-        idx = ALL_FEATURES.index('IsHTTPS')
-        raw_val = float(df['IsHTTPS'].values[0])
-        data_max = float(scaler.data_max_[idx])
-        X_scaled[0, idx] = max(0.0, min(1.0, raw_val / data_max if data_max > 0 else 0.0))
+    X_scaled = scaler.transform(df)
+    ml_prob  = float(model.predict_proba(X_scaled)[0][1])
+    ml_label = 'PHISHING' if ml_prob >= 0.5 else 'CLEAN'
+    print(f"         ML prediction: {ml_label} (score={ml_prob:.3f})")
 
-    ml_label      = model.predict(X_scaled)[0]
-    ml_probs      = model.predict_proba(X_scaled)[0]
-    ml_phish_prob = float(ml_probs[1])
-
-    log(f"         ML prediction: {'PHISHING' if ml_label==1 else 'SAFE'} (p={ml_phish_prob:.3f})")
+    if audit:
+        print(f"\n  Scaled feature vector:")
+        for i, f in enumerate(ALL_FEATURES):
+            print(f"    [{i}] {f:<35} raw={row[f]:<12} scaled={X_scaled[0][i]:.6f}")
 
     # ------------------------------------------------------------------
-    # STEP 3: Google Safe Browsing fallback (borderline cases)
+    # STAGE 4: Google Safe Browsing fallback (borderline only)
     # ------------------------------------------------------------------
     gsb_result = {'is_phishing': False, 'threat_type': None, 'available': False, 'queried': False}
-    is_borderline = BORDERLINE_LOW <= ml_phish_prob <= BORDERLINE_HIGH
-    force_gsb = os.environ.get('FORCE_GSB', '0') == '1'
+    is_borderline = BORDERLINE_LOW <= ml_prob <= BORDERLINE_HIGH
 
-    has_api_key = GSB_API_KEY and GSB_API_KEY != 'YOUR_GSB_API_KEY_HERE'
-
-    if is_borderline or force_gsb:
-        reason = "Forced via flag" if force_gsb else f"Borderline confidence ({ml_phish_prob:.1%})"
-        log(f"\n[STEP 3] [FALLBACK] {reason} - querying Google Safe Browsing...")
-        gsb_result = check_google_safe_browsing(fetch_url)
+    if is_borderline:
+        print(f"\n[STAGE 4] Borderline score ({ml_prob:.1%}) — querying Google Safe Browsing...")
+        gsb_result = check_gsb(url)
         gsb_result['queried'] = True
         if gsb_result['available']:
             status = f"FLAGGED ({gsb_result['threat_type']})" if gsb_result['is_phishing'] else "CLEAN"
-            log(f"         GSB result: {status}")
+            print(f"         GSB result: {status}")
         else:
-            log("         GSB not available (no API key configured or network error).")
+            print("         GSB not available (no API key or network error)")
     else:
-        log(f"\n[STEP 3] Skipping GSB (high-confidence ML result: {ml_phish_prob:.1%})")
+        print(f"\n[STAGE 4] Skipping GSB (high-confidence ML result: {ml_prob:.1%})")
 
     # ------------------------------------------------------------------
-    # STEP 4: Weighted Fusion
+    # Final score fusion
     # ------------------------------------------------------------------
-    log("\n[STEP 4] Computing final verdict...")
-
-    gsb_score = 1.0 if gsb_result['is_phishing'] else 0.0
-
     if gsb_result['queried'] and gsb_result['available']:
         if gsb_result['is_phishing']:
-             final_score = max(ml_phish_prob, 0.85) # GSB positive is a strong override
+            final_score = max(ml_prob, 0.99)
         else:
-             # GSB is clean: cap final_score at 0.60 so it falls into SUSPICIOUS at worst
-             final_score = min(ml_phish_prob, 0.60)
+            final_score = min(ml_prob, 0.60)
     else:
-        final_score = ml_phish_prob  # Trust ML fully when GSB not used
-
-    # Hard overrides
-    if page_unreachable and age_bucket == 1:
-        final_score = max(final_score, 0.75)  # Dead + new domain = very suspicious
+        final_score = ml_prob
 
     if final_score < 0.50:
         verdict = "CLEAN"
-        is_phishing = False
     elif final_score < 0.85:
         verdict = "SUSPICIOUS"
-        is_phishing = False
     else:
         verdict = "PHISHING"
-        is_phishing = True
 
     # ------------------------------------------------------------------
-    # STEP 5: Display Verdict
+    # Display verdict
     # ------------------------------------------------------------------
     print(f"\n{'='*60}")
-    if page_unreachable:
-        print(f"  [INFO] Page was unreachable (domain dead or blocked)")
-    
-    if verdict == "PHISHING":
-        print(f"  [VERDICT] PHISHING / MALICIOUS")
-    elif verdict == "SUSPICIOUS":
-        print(f"  [VERDICT] SUSPICIOUS / BORDERLINE")
-    else:
-        print(f"  [VERDICT] SAFE / LEGITIMATE")
-        
+    verdict_labels = {
+        "CLEAN":     "CLEAN / SAFE",
+        "SUSPICIOUS": "SUSPICIOUS / BORDERLINE",
+        "PHISHING":  "PHISHING / MALICIOUS"
+    }
+    print(f"  [VERDICT] {verdict_labels[verdict]}")
     print(f"  [VERDICT] Risk Score: {final_score:.1%}")
-
     print(f"\n  Breakdown:")
-    print(f"    ML Model Score:  {ml_phish_prob:.1%}")
-    
+    print(f"    ML Model Score:    {ml_prob:.1%}")
+
     if gsb_result['queried'] and gsb_result['available']:
         gsb_str = f"FLAGGED ({gsb_result['threat_type']})" if gsb_result['is_phishing'] else "Clean"
-    elif has_api_key:
-        gsb_str = "Skipped (high ML confidence)"
+    elif GSB_API_KEY:
+        gsb_str = "Skipped (score outside borderline range)"
     else:
-        gsb_str = "Not configured (add GSB_API_KEY)"
-        
+        gsb_str = "Not configured (add GSB_API_KEY to .env)"
     print(f"    Google Safe Browsing: {gsb_str}")
-    print(f"    Domain Age: {age_labels.get(age_bucket, 'Unknown')}")
 
-    # Top features & Audit Mode
     importances = dict(zip(ALL_FEATURES, model.feature_importances_))
-    sorted_importances = sorted(importances.items(), key=lambda x: x[1], reverse=True)
-    
-    if audit:
-        print("\n" + "=" * 60)
-        print("  FEATURE IMPORTANCE AUDIT")
-        print("=" * 60)
-        print(f"  {'Rank':<5} {'Feature':<30} {'Weight':<10} {'Extracted Value':<15}")
-        print("-" * 60)
-        for idx, (feat, weight) in enumerate(sorted_importances, 1):
-            val = combined.get(feat, 0.0)
-            print(f"  {idx:<5} {feat:<30} {weight:<10.4f} {str(val):<15}")
-        print("=" * 60)
-        print("\n  Canonical Feature Order (44 features):")
-        print(ALL_FEATURES)
-        print("\n  Raw Vector (44 values):")
-        print([float(df[feat].values[0]) for feat in ALL_FEATURES])
-        print("\n  Scaled Vector (44 values):")
-        print(X_scaled[0].tolist())
-        print("=" * 60 + "\n")
-    else:
-        print(f"\n  Top 5 contributing features:")
-        for feat, imp in sorted_importances[:5]:
-            val = combined.get(feat, 'N/A')
-            print(f"    {feat:<38} val={val}  weight={imp:.3f}")
-        print(f"{'='*60}\n")
+    sorted_imp = sorted(importances.items(), key=lambda x: x[1], reverse=True)
+    print(f"\n  Top features by importance:")
+    for feat, imp in sorted_imp[:5]:
+        val = row.get(feat, 'N/A')
+        print(f"    {feat:<38} val={val}  weight={imp:.3f}")
+    print(f"{'='*60}\n")
 
     return {
         'url': url,
-        'is_phishing': is_phishing,
+        'is_phishing': verdict == "PHISHING",
         'final_score': final_score,
-        'ml_score': ml_phish_prob,
+        'ml_score': ml_prob,
         'gsb': gsb_result,
-        'domain_age_bucket': age_bucket,
-        'page_unreachable': page_unreachable,
-        'features': combined,
+        'source': 'ML'
     }
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python ml-pipeline/test_url.py <URL> [--force-gsb] [--audit]")
+        print("Usage: python ml-pipeline/test_url.py <URL> [--audit]")
         sys.exit(1)
 
-    force = '--force-gsb' in sys.argv
-    if force:
-        os.environ['FORCE_GSB'] = '1'
-        sys.argv.remove('--force-gsb')
-
     audit = '--audit' in sys.argv
-    if audit:
-        sys.argv.remove('--audit')
-
     url_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+
     if not url_args:
         print("Error: No URL provided.")
-        print("Usage: python ml-pipeline/test_url.py <URL> [--force-gsb] [--audit]")
         sys.exit(1)
 
     detect(url_args[0], audit=audit)
