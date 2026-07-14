@@ -26,10 +26,12 @@ train/inference parity. See SOURCE_OF_TRUTH.md.
 # character ratios. These separate real phishing (.tk/.gq TLDs, typosquats, digits,
 # obfuscation) from legitimate sites without keying on raw URL length.
 LEXICAL_FEATURES = [
-    'IsDomainIP', 'URLSimilarityIndex', 'CharContinuationRate',
-    'TLDLegitimateProb', 'URLCharProb', 'NoOfSubDomain',
-    'HasObfuscation', 'ObfuscationRatio', 'LetterRatioInURL',
-    'DegitRatioInURL', 'SpacialCharRatioInURL', 'IsHTTPS'
+    'URLLength', 'DomainLength', 'IsDomainIP', 'URLSimilarityIndex',
+    'CharContinuationRate', 'TLDLegitimateProb', 'URLCharProb', 'NoOfSubDomain',
+    'HasObfuscation', 'NoOfObfuscatedChar', 'ObfuscationRatio', 'NoOfLettersInURL',
+    'LetterRatioInURL', 'NoOfDegitsInURL', 'DegitRatioInURL', 'NoOfEqualsInURL',
+    'NoOfQMarkInURL', 'NoOfAmpersandInURL', 'NoOfOtherSpecialCharsInURL',
+    'SpacialCharRatioInURL', 'IsHTTPS'
 ]
 
 # Dropped from the model (train/serve skew). Kept here, empty, so any
@@ -38,7 +40,7 @@ DOMAIN_FEATURES = []
 CONTENT_FEATURES = []
 
 ALL_FEATURES = LEXICAL_FEATURES + DOMAIN_FEATURES + CONTENT_FEATURES
-assert len(ALL_FEATURES) == 12  # v4 robust scale-invariant lexical subset
+assert len(ALL_FEATURES) == 21  # v4 robust scale-invariant lexical subset
 
 FEATURE_CATEGORIES = {
     'URL_STRUCTURE': LEXICAL_FEATURES,

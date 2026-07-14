@@ -336,24 +336,24 @@ def preprocess_data(X, y):
 
 
 def train_random_forest(X_train, y_train):
-    """Train with 10-fold cross-validation."""
+    """Train with 5-fold cross-validation using tuned hyperparameters."""
     rf = RandomForestClassifier(
-        n_estimators=100,        # 100 trees
-        max_depth=20,            # Prevent overfitting
-        min_samples_split=5,
-        min_samples_leaf=2,
-        max_features='sqrt',     # Random subspace
+        n_estimators=300,
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        max_features='log2',
         random_state=42,
         n_jobs=-1,
         class_weight='balanced'
     )
 
-    # 10-fold stratified cross-validation
-    print("\nRunning 10-fold stratified cross-validation...")
-    cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+    # 5-fold stratified cross-validation
+    print("\nRunning 5-fold stratified cross-validation...")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(rf, X_train, y_train, cv=cv, scoring='accuracy')
 
-    print(f"  10-Fold CV Accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    print(f"  5-Fold CV Accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
     print(f"  Per-fold: {[f'{s:.4f}' for s in cv_scores]}")
 
     # Train on full training set
