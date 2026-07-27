@@ -73,8 +73,10 @@ def export_model():
     print(f"   Size: {size_kb:.1f} KB")
     
     # Verify by running a test prediction
-    test_input = np.zeros((1, model.n_features_in_))
-    sklearn_pred = model.predict_proba(test_input)[0]
+    # Use a named DataFrame so MinMaxScaler (fitted with feature names) doesn't warn.
+    import pandas as pd
+    test_df = pd.DataFrame(np.zeros((1, model.n_features_in_)), columns=ALL_FEATURES)
+    sklearn_pred = model.predict_proba(test_df)[0]
     
     # Simulate JSON inference
     def predict_tree(tree, features):
@@ -86,7 +88,7 @@ def export_model():
             return predict_tree(tree["r"], features)
     
     # Average all trees
-    scaled_input = scaler.transform(test_input)[0]
+    scaled_input = scaler.transform(test_df)[0]
     probs = np.zeros(len(model.classes_))
     for tree in trees:
         leaf_probs = predict_tree(tree, scaled_input)

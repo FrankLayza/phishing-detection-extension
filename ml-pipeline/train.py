@@ -338,11 +338,11 @@ def preprocess_data(X, y):
 def train_random_forest(X_train, y_train):
     """Train with 5-fold cross-validation using tuned hyperparameters."""
     rf = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=None,
-        min_samples_split=2,
-        min_samples_leaf=1,
-        max_features='log2',
+        n_estimators=100,       # 300 → 100: 3× faster, ~⅓ export size
+        max_depth=20,           # None → 20: prevents fully-grown trees that bloat JSON to 175 MB
+        min_samples_split=5,    # Regularise splits (prevents over-fitting leaf noise)
+        min_samples_leaf=4,     # Ensures each leaf covers ≥4 samples → smaller trees
+        max_features='log2',    # log2(21) ≈ 4 features per split — unchanged
         random_state=42,
         n_jobs=-1,
         class_weight='balanced'

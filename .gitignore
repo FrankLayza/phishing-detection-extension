@@ -68,3 +68,6 @@ PhishGuard_Implementation_Guide.md
 .gemini/
 MODEL_AUDIT.md
 AUDIT_SUMMARY.md
+# Scratch / dissertation tooling
+correct_dissertation.py
+docx_extracted.txt

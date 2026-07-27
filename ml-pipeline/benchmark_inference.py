@@ -14,24 +14,27 @@ from features.feature_config import ALL_FEATURES
 
 def benchmark_sklearn():
     """Benchmark sklearn model inference time."""
+    import pandas as pd
     model = joblib.load('models/random_forest.pkl')
     scaler = joblib.load('models/scaler.pkl')
 
-    # Create a realistic test input (random features in [0,1] range)
+    # Create realistic test inputs as a named DataFrame so MinMaxScaler
+    # (fitted with feature names) doesn't emit a UserWarning on every call.
     np.random.seed(42)
-    test_inputs = np.random.rand(100, len(ALL_FEATURES)).astype(np.float32)
+    raw = np.random.rand(100, len(ALL_FEATURES)).astype(np.float64)
+    test_df = pd.DataFrame(raw, columns=ALL_FEATURES)
 
     # Warm-up
     for i in range(10):
-        scaled = scaler.transform(test_inputs[i:i+1])
+        scaled = scaler.transform(test_df.iloc[i:i+1])
         model.predict_proba(scaled)
 
     # Benchmark: 1000 single-URL predictions
     times = []
     for i in range(1000):
-        x = test_inputs[i % 100:i % 100 + 1]
+        row = test_df.iloc[i % 100:i % 100 + 1]
         start = time.perf_counter()
-        scaled = scaler.transform(x)
+        scaled = scaler.transform(row)
         model.predict_proba(scaled)
         end = time.perf_counter()
         times.append((end - start) * 1000)  # Convert to ms
