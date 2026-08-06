@@ -13,6 +13,7 @@
  *   ml-pipeline/features/content_extractor.py
  */
 import type { FeatureVector } from "../types";
+import { parseHost, rawHost, rawPath } from "../ml/tldextract";
 
 // ---------------------------------------------------------------------------
 // Constants — must match Python lexical_extractor.py exactly
@@ -101,19 +102,16 @@ function computeBrandSimilarity(domainSld: string, url: string): number {
 
   // --- Path portion: exact match here IS suspicious ---
   let pathMaxSim = 0.0;
-  try {
-    const path = new URL(url).pathname;
-    const segments = path.split("/").filter((s) => s.length >= 4).map((s) => s.toLowerCase());
-    for (const segment of segments) {
-      for (const brand of BRANDS) {
-        if (segment === brand) return 1.0; // definite brand abuse
-        const dist = levenshtein(segment, brand);
-        const sim = 1 - dist / Math.max(segment.length, brand.length);
-        if (sim > pathMaxSim) pathMaxSim = sim;
-      }
+  // Raw path (no WHATWG percent-encoding) to match Python's urlparse().path.
+  const path = rawPath(url);
+  const segments = path.split("/").filter((s) => s.length >= 4).map((s) => s.toLowerCase());
+  for (const segment of segments) {
+    for (const brand of BRANDS) {
+      if (segment === brand) return 1.0; // definite brand abuse
+      const dist = levenshtein(segment, brand);
+      const sim = 1 - dist / Math.max(segment.length, brand.length);
+      if (sim > pathMaxSim) pathMaxSim = sim;
     }
-  } catch {
-    // URL parse failure — ignore path portion
   }
 
   return Math.max(domainMaxSim, pathMaxSim);
@@ -128,10 +126,11 @@ function continuationRate(url: string): number {
   if (url.length < 2) return 0.0;
   let continuations = 0;
   for (let i = 1; i < url.length; i++) {
-    const prevAlpha = /[a-zA-Z]/.test(url[i - 1]);
-    const currAlpha = /[a-zA-Z]/.test(url[i]);
-    const prevDigit = /[0-9]/.test(url[i - 1]);
-    const currDigit = /[0-9]/.test(url[i]);
+    // Unicode-aware like Python str.isalpha()/str.isdigit().
+    const prevAlpha = /\p{L}/u.test(url[i - 1]);
+    const currAlpha = /\p{L}/u.test(url[i]);
+    const prevDigit = /\p{Nd}/u.test(url[i - 1]);
+    const currDigit = /\p{Nd}/u.test(url[i]);
     if ((prevAlpha && currAlpha) || (prevDigit && currDigit)) {
       continuations++;
     }
@@ -156,61 +155,12 @@ function charProbability(url: string): number {
 }
 
 /**
- * Extract TLD from hostname.
- * Handles compound TLDs like "co.uk" by checking against TLD_SCORES keys.
- * Falls back to last dot-separated part.
+ * Domain (SLD + TLD) and subdomain decomposition is delegated to src/ml/tldextract.ts —
+ * a 1:1 port of the Python `tldextract` algorithm (Public Suffix List), so the browser
+ * computes the same DomainLength / NoOfSubDomain / TLDLegitimateProb / URLSimilarityIndex
+ * values as training. Previously this file used a 14-entry hardcoded TLD dict, which
+ * diverged on country/compound TLDs and IP hosts (~10% of URLs — see check_parity.py).
  */
-function extractTld(hostname: string): string {
-  const parts = hostname.split(".");
-  if (parts.length >= 2) {
-    // Check compound TLD first (e.g., "co.uk")
-    const compound = parts.slice(-2).join(".");
-    if (compound in TLD_SCORES) return compound;
-  }
-  return parts[parts.length - 1] || "";
-}
-
-/**
- * Extract the second-level domain (SLD) from a hostname.
- * e.g. "mail.google.com" → "google", "bbc.co.uk" → "bbc"
- */
-function extractSld(hostname: string): string {
-  const parts = hostname.split(".");
-  if (parts.length >= 2) {
-    const compound = parts.slice(-2).join(".");
-    if (compound in TLD_SCORES) {
-      // SLD is the part before the compound TLD
-      return parts.length >= 3 ? parts[parts.length - 3] : parts[0];
-    }
-  }
-  // Standard: SLD is second-to-last
-  return parts.length >= 2 ? parts[parts.length - 2] : parts[0];
-}
-
-/**
- * Extract domain (SLD + TLD) from hostname, matching Python's
- * `f"{extracted.domain}.{extracted.suffix}"` from tldextract.
- */
-function extractDomain(hostname: string): string {
-  const tld = extractTld(hostname);
-  const sld = extractSld(hostname);
-  return tld ? `${sld}.${tld}` : sld;
-}
-
-/**
- * Count subdomain parts, matching Python's
- * `extracted.subdomain.split('.') if extracted.subdomain else []`
- */
-function countSubdomains(hostname: string): number {
-  const tld = extractTld(hostname);
-  const parts = hostname.split(".");
-  // For compound TLD like co.uk: domain.co.uk → 0 subdomains
-  // sub.domain.co.uk → 1 subdomain
-  const tldParts = tld.split(".").length;
-  const sldAndTldParts = 1 + tldParts; // SLD + TLD parts
-  const subParts = parts.length - sldAndTldParts;
-  return Math.max(0, subParts);
-}
 
 // ---------------------------------------------------------------------------
 // Main extractor — produces all 44 features in canonical index order
@@ -236,10 +186,18 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
     parsed = new URL("http://invalid.local");
   }
 
-  const hostname = parsed.hostname;
-  const domain = extractDomain(hostname);
-  const domainSld = extractSld(hostname);
-  const tld = extractTld(hostname);
+  // Hostname as Python's tldextract sees it: raw string, no percent-decoding,
+  // no IDN punycode conversion (see tldextract.ts rawHost).
+  const hostname = rawHost(url);
+  const parsedHost = parseHost(hostname);
+  // Mirrors Python lexical_extractor.py:
+  //   domain = f"{extracted.domain}.{extracted.suffix}" if extracted.suffix
+  //            else extracted.domain
+  const domain = parsedHost.suffix
+    ? `${parsedHost.domain}.${parsedHost.suffix}`
+    : parsedHost.domain;
+  const domainSld = parsedHost.domain;
+  const tld = parsedHost.suffix;
 
   // =========================================================================
   // GROUP A: LEXICAL FEATURES (indices 0–20)
@@ -270,7 +228,11 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   const URLCharProb = charProbability(url);
 
   // [7] NoOfSubDomain — subdomain component count
-  const NoOfSubDomain = countSubdomains(hostname);
+  // Mirrors Python: subdomain_parts = extracted.subdomain.split('.')
+  //                  if extracted.subdomain else []
+  const NoOfSubDomain = parsedHost.subdomain
+    ? parsedHost.subdomain.split(".").length
+    : 0;
 
   // [8] HasObfuscation — any %XX encoding present
   const obfuscationCount = (url.match(/%/g) || []).length;
@@ -283,14 +245,16 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   const ObfuscationRatio = url.length > 0 ? obfuscationCount / url.length : 0;
 
   // [11] NoOfLettersInURL — alpha character count
-  const letters = (url.match(/[a-zA-Z]/g) || []).length;
+  // Unicode-aware (\p{L}) to match Python str.isalpha() on IDN URLs.
+  const letters = (url.match(/\p{L}/gu) || []).length;
   const NoOfLettersInURL = letters;
 
   // [12] LetterRatioInURL — alpha ratio
   const LetterRatioInURL = url.length > 0 ? letters / url.length : 0;
 
   // [13] NoOfDegitsInURL — digit character count
-  const digits = (url.match(/[0-9]/g) || []).length;
+  // Unicode-aware (\p{Nd}) to match Python str.isdigit().
+  const digits = (url.match(/\p{Nd}/gu) || []).length;
   const NoOfDegitsInURL = digits;
 
   // [14] DegitRatioInURL — digit ratio

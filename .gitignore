@@ -31,6 +31,11 @@ models/*.json
 # Keep the models folder struct but ignore pickles
 !models/.gitkeep
 
+# Parity harness generated artifacts (rebuilt on demand)
+ml-pipeline/__parity_bundle.mjs
+parity_urls.json
+parity_ts.json
+
 # Node / Plasmo Browser Extension
 node_modules/
 phishing-extension/node_modules/
@@ -71,3 +76,4 @@ AUDIT_SUMMARY.md
 # Scratch / dissertation tooling
 correct_dissertation.py
 docx_extracted.txt
+FINAL_YEAR_RESEARCH_PROJECT_COMPLETE_CORRECTED.docx
