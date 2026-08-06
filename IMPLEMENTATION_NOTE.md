@@ -4,6 +4,66 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
+## August 6, 2026 — Verification pass: doc/artifact drift corrected, SHAP regenerated
+
+**Why:** Re-verified the Aug 5 parity work against the live repo rather than the write-ups.
+The parity fix itself holds — but two artifacts were stale and one documented conclusion
+was wrong.
+
+### Verified good (re-run live, not cited from docs)
+* `check_parity.py` → **0 mismatches / 20,160 values** across 960 URLs, 0 Python errors,
+  after regenerating `parity_ts.json` fresh.
+* `npx tsc --noEmit` → exit 0. `pnpm build` (plasmo, chrome-mv3) → succeeds in ~31 s.
+* `psl-trie.ts` → **6,933 rules** (16 wildcard, 8 exception), matching the documented count.
+* Pre-fix `feature-extractor.ts` confirmed to carry exactly the 14-entry `TLD_SCORES` dict
+  (`com org net edu gov co.uk de fr jp tk ml ga cf gq`) used as compound-TLD authority.
+* `shap_mapping.json` shipped to the extension covers 21/21 features — no drift.
+
+### Fixed: `SOURCE_OF_TRUTH.md` §3 carried pre-retrain metrics
+SOT still published the **pre-corpus-fix** model's numbers (94.02% / 95.14% / 92.21%,
+TN=21,049 FP=951) while `models/evaluation_results.json` held the Aug 5 retrain
+(92.82% / 94.66% / 90.07%, TN=20,974 FP=1,026). Corrected in place, with FPR recomputed
+to 4.66% and FNR to 9.93% from the actual confusion matrix.
+
+Also removed the **5-fold CV claim "93.85% (±0.11%)"**: `train.py:486` only `print()`s the
+CV score and never persists it, so no artifact ever backed that figure — and it was measured
+on the pre-fix model. Marked *not persisted* rather than restated. **Do not cite a CV number
+until `train.py` writes it to `evaluation_results.json`.**
+
+Added **§3a** promoting unknown-legit FPR (18.1% curated / 19.1% sampled) into SOT proper,
+so the headline accuracy figure is no longer readable without the metric that actually
+gates the product.
+
+### Fixed: `models/shap_values.json` was stale by two days
+The file was dated Aug 3 against an Aug 5 model retrain. Regenerated via
+`gen_shap_table.py` (exact TreeExplainer, 500 seeded samples).
+
+**This falsified a claim made in this very note.** The Aug 5 entry asserted the inverted
+`NoOfSubDomain` SHAP direction was "gone". It is not:
+
+| | Pre-fix | Post-fix |
+|---|---|---|
+| `NoOfSubDomain` permutation importance | 0.256 (#1) | 0.091 (#5) |
+| `NoOfSubDomain` mean\|SHAP\| | 0.1770 (#1) | 0.0758 (#2) |
+| `NoOfSubDomain` value↔SHAP corr | −0.75 | **−0.84** |
+
+The corpus fix reduced the feature's *magnitude* but left its direction inverted, slightly
+more so. Corrected the Aug 5 entry above and SOT §4. New top feature by mean|SHAP| is
+`TLDLegitimateProb` (0.0789).
+
+### New finding: the model effectively runs on ~11 features, not 21
+`IsHTTPS` has mean|SHAP| = **0.000000** — constant across the sample, contributing nothing.
+`ObfuscationRatio`, `NoOfObfuscatedChar`, `HasObfuscation`, `IsDomainIP` all sit below 4e-5.
+Presenting the 21-feature set as uniformly load-bearing overstates it; noted in SOT §4.
+
+### Still open (unchanged by this pass)
+* Unknown-legit FPR 18–19% vs <10% target — distributional, not extractor skew.
+* Verdict thresholds still uncalibrated (CLEAN <0.50). Sweep documented, not applied.
+* `cross_validate_ts.mjs` still prints stale v3 text.
+* 5-fold CV not persisted by `train.py` (see above).
+
+---
+
 ## August 5, 2026 — Extractors now actually byte-identical: Python↔TS parity fixed on 960 URLs
 
 **Why:** `check_parity.py` (new this session) compared the Python training extractor
@@ -119,8 +179,10 @@ top-1m ranks >=120k. Reports FPR for the ML tier alone and for the full pipeline
 
 Held-out accuracy fell 1.2 points while the real-world false-positive rate fell by
 **two thirds** — the accuracy drop is the corpus artifact being removed, not a
-regression. `NoOfSubDomain` collapsing from #1 to #5 confirms the structure artifact
-(and its SHAP direction inverted vs the literature) is gone.
+regression. `NoOfSubDomain` collapsed from #1 to #5 in *permutation* importance (0.256 → 0.091),
+confirming the structure artifact's magnitude shrank. However, its **SHAP direction did not
+correct**: r moved from −0.75 to −0.84 (marginally stronger), still running opposite to the
+phishing literature. The feature's load-bearing magnitude dropped; the inversion persists.
 
 ### Negative result recorded: do NOT drop the length features
 `feature_config.py` carried a comment claiming the raw length/count features had been
