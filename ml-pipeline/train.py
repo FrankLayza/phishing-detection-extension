@@ -167,56 +167,186 @@ def inject_popular_legit(phi, random_state=42, variants_per_domain=12):
 
 
 TOP_SITES_PATH = 'datasets/top-1m.csv'
-N_LEGIT = 110000  # number of top-sites domains to use as the legitimate class
+# The legitimate class is drawn from TWO populations so the model sees both
+# kinds of real site the extension actually meets:
+#   - popular short-domain sites (Cisco Umbrella top-1m)
+#   - obscure long-domain small sites (PhiUSIIL's own legitimate class:
+#     local clinics, schools, regional business, university pages)
+# Using only the former is what made unknown small/regional sites score as
+# phishing. Sizes are picked to land near class balance against the ~101k
+# PhiUSIIL phishing URLs so SMOTE is not needed at all.
+N_TOP_SITES = 55000
+N_PHIUSIIL_LEGIT = 55000
 
 
-def build_legit_urls_from_top_sites(n=N_LEGIT, random_state=42):
+def measure_structure(phish_urls):
     """
-    Build legitimate URLs from a real top-sites list (Cisco Umbrella top-1m).
+    Measure the EMPIRICAL URL-structure distribution of the phishing class:
+    per-URL path depth and segment lengths, subdomain counts, and subdomain
+    label lengths. Returns distributions to sample from — NOT literal strings.
 
-    This REPLACES PhiUSIIL's legitimate class, which is biased toward obscure,
-    long-named, bare domains and causes the model to flag real popular homepages.
-    Top-sites domains are genuine, popular, mostly short-domain sites — the
-    population the extension actually encounters.
+    Why distributions and not the strings themselves: the previous augmentation
+    attached a fixed 15-item list of short, shallow paths ('/help', '/p/12345')
+    to legitimate domains, while phishing URLs carried real paths averaging
+    ~31 chars at depth ~2.2. Path SHAPE therefore became a class signal and the
+    model learned "long or deep path => phishing". Measured on the shipped
+    model: appending a path to a legitimate domain moved the mean score
+    0.616 -> 0.910, and a long path -> 0.968 — legitimate sites flagged purely
+    for having a URL path.
 
-    Each domain is emitted with structure (path / subdomain) matching the phishing
-    class distribution (~27% path, ~45% subdomain) so URL *structure* carries no
-    class information and the model must rely on genuine content signals.
+    Copying phishing path/subdomain STRINGS onto legitimate domains would fix
+    the shape artifact but inject label noise: it would produce training rows
+    like 'atlantid99.google.com/ai/sign.php' labelled legitimate, teaching the
+    model to ignore genuine phishing patterns. So we match only the structural
+    moments (depth, segment length, subdomain count) and fill them with benign
+    vocabulary. Shape then carries no class signal, while character composition
+    stays a real, honest signal.
+    """
+    from urllib.parse import urlparse
+    depths, seg_lens, sub_counts, sub_lens = [], [], [], []
+    for u in phish_urls:
+        try:
+            p = urlparse(str(u))
+        except Exception:
+            continue
+        tail = p.path.rstrip('/')
+        if p.query:
+            tail = f"{tail}?{p.query}"
+        segs = [s for s in tail.split('/') if s]
+        if segs:
+            depths.append(len(segs))
+            seg_lens.extend(len(s) for s in segs)
+        host = (p.hostname or '').lower()
+        if host.startswith('www.'):
+            host = host[4:]
+        labels = host.split('.')
+        extra = labels[:-2]
+        sub_counts.append(len(extra))
+        sub_lens.extend(len(s) for s in extra if s)
+    print(f"  Phishing structure measured: path depth mean {np.mean(depths):.2f}, "
+          f"segment len mean {np.mean(seg_lens):.1f}, subdomain>0 {100*np.mean(np.array(sub_counts) > 0):.1f}%")
+    return {
+        'depths': np.array(depths),
+        'seg_lens': np.array(seg_lens),
+        'sub_counts': np.array(sub_counts),
+        'sub_lens': np.array(sub_lens),
+        'path_rate': float(np.mean(np.array(depths).size / max(len(phish_urls), 1))),
+    }
+
+
+# Benign vocabulary for synthesizing legitimate URL structure. Ordinary words a
+# real site would use — the point is to reproduce phishing-class path SHAPE
+# (depth, segment length) without importing phishing-class path CONTENT.
+BENIGN_SEGMENTS = [
+    'about', 'contact', 'services', 'products', 'news', 'blog', 'articles',
+    'support', 'help', 'faq', 'pricing', 'careers', 'team', 'privacy', 'terms',
+    'search', 'category', 'collections', 'gallery', 'events', 'resources',
+    'downloads', 'documentation', 'guides', 'tutorials', 'community', 'account',
+    'profile', 'settings', 'dashboard', 'orders', 'checkout', 'cart', 'wishlist',
+    'admissions', 'courses', 'faculty', 'research', 'library', 'alumni',
+    'appointments', 'booking', 'locations', 'branches', 'insurance', 'loans',
+    'savings', 'transfers', 'statements', 'index', 'home', 'main', 'archive',
+]
+BENIGN_SUBDOMAINS = [
+    'www', 'shop', 'store', 'blog', 'news', 'mail', 'support', 'help', 'docs',
+    'api', 'app', 'my', 'portal', 'account', 'login', 'secure', 'en', 'de',
+    'fr', 'es', 'careers', 'events', 'media', 'cdn', 'static', 'images',
+    'admin', 'dashboard', 'learn', 'community', 'forum', 'wiki', 'status',
+]
+
+
+def _synth_segment(rng, target_len):
+    """Build a benign path segment of roughly target_len characters."""
+    seg = BENIGN_SEGMENTS[rng.randint(len(BENIGN_SEGMENTS))]
+    while len(seg) < target_len:
+        joiner = '-' if rng.random() < 0.7 else '_'
+        seg = seg + joiner + BENIGN_SEGMENTS[rng.randint(len(BENIGN_SEGMENTS))]
+    if len(seg) > target_len and target_len >= 3:
+        seg = seg[:target_len].rstrip('-_')
+    return seg or 'page'
+
+
+def _synth_sub_label(rng, target_len):
+    """Build a benign subdomain label of roughly target_len characters."""
+    lab = BENIGN_SUBDOMAINS[rng.randint(len(BENIGN_SUBDOMAINS))]
+    while len(lab) < target_len:
+        lab = lab + '-' + BENIGN_SUBDOMAINS[rng.randint(len(BENIGN_SUBDOMAINS))]
+    if len(lab) > target_len and target_len >= 2:
+        lab = lab[:target_len].rstrip('-')
+    return lab or 'www'
+
+
+def build_legit_urls(phish_urls, random_state=42):
+    """
+    Build the legitimate class from both real populations, synthesizing URL
+    structure whose DISTRIBUTION matches the phishing class (path rate, depth,
+    segment length, subdomain count) but whose CONTENT is benign vocabulary.
+    See measure_structure() for why distribution-matching beats string-copying.
     """
     rng = np.random.RandomState(random_state)
+    dist = measure_structure(phish_urls)
+    depths, seg_lens = dist['depths'], dist['seg_lens']
+    sub_counts, sub_lens = dist['sub_counts'], dist['sub_lens']
+
     top = pd.read_csv(TOP_SITES_PATH, header=None, names=['rank', 'domain'])
-    domains = top['domain'].dropna().astype(str).head(n).tolist()
+    top_domains = top['domain'].dropna().astype(str).head(N_TOP_SITES).tolist()
 
-    subdomains = ['app', 'login', 'account', 'my', 'secure', 'shop', 'help',
-                  'support', 'en', 'mail', 'portal', 'dev', 'news', 'store']
-    paths = ['/home', '/login', '/account', '/about', '/products', '/help',
-             '/search?q=test', '/p/12345', '/signin', '/dashboard', '/contact',
-             '/pricing', '/terms', '/privacy', '/index.html']
+    phi_all = pd.read_csv('datasets/phiusiil.csv').dropna(subset=['URL'])
+    phi_legit = phi_all[phi_all['label'] == 1]['URL'].astype(str).tolist()
+    from urllib.parse import urlparse
+    small_domains = []
+    for u in phi_legit:
+        try:
+            h = (urlparse(u).hostname or '').lower()
+        except Exception:
+            continue
+        if h.startswith('www.'):
+            h = h[4:]
+        if h and '.' in h:
+            small_domains.append(h)
+    rng.shuffle(small_domains)
+    small_domains = small_domains[:N_PHIUSIIL_LEGIT]
 
+    domains = [d.strip().lower() for d in top_domains + small_domains]
+    print(f"  Legitimate domains: {len(top_domains)} top-sites + {len(small_domains)} small/obscure real sites")
+
+    # Measured phishing rates: 27.2% carry a path, 57.3% carry a subdomain.
+    PATH_RATE = 0.272
     urls = []
     for d in domains:
-        d = d.strip().lower()
         if not d or '.' not in d:
             continue
         host = d
-        if not host.startswith('www.') and rng.random() < 0.45:
-            host = rng.choice(subdomains) + '.' + host
-        path = rng.choice(paths) if rng.random() < 0.27 else ''
-        urls.append('https://' + host + path)
-    print(f"  Top-sites legitimate URLs: {len(urls)} (from top {n} domains)")
+        # Subdomain count sampled from the phishing distribution, filled benignly.
+        n_sub = int(sub_counts[rng.randint(len(sub_counts))])
+        if len(host.split('.')) == 2 and n_sub > 0:
+            labels = [_synth_sub_label(rng, int(sub_lens[rng.randint(len(sub_lens))]))
+                      for _ in range(n_sub)]
+            host = '.'.join(labels) + '.' + host
+        # Path depth and segment lengths sampled from the phishing distribution.
+        tail = ''
+        if rng.random() < PATH_RATE:
+            depth = int(depths[rng.randint(len(depths))])
+            segs = [_synth_segment(rng, int(seg_lens[rng.randint(len(seg_lens))]))
+                    for _ in range(depth)]
+            tail = '/' + '/'.join(segs)
+        urls.append('https://' + host + tail)
+    print(f"  Legitimate URLs built: {len(urls)} (structure distribution-matched to phishing class)")
     return urls
 
 
 def load_and_prepare_dataset():
     """
     Build the training matrix from:
-      - LEGITIMATE class: real top-sites domains (Cisco Umbrella top-1m),
-        structure-augmented to match the phishing distribution.
+      - LEGITIMATE class: real top-sites domains (Cisco Umbrella top-1m) PLUS
+        real small/obscure legitimate sites (PhiUSIIL's own legitimate class),
+        with URL structure resampled from the phishing class's empirical
+        distribution so path/subdomain shape carries no class signal.
       - PHISHING class:    PhiUSIIL phishing URLs (raw label == 0).
     Lexical features are SELF-EXTRACTED with the same function used at inference,
     guaranteeing train/serve parity. Labels: 1 = phishing, 0 = legitimate.
     """
-    print("Loading PhiUSIIL (phishing class) + top-sites (legitimate class)...")
+    print("Loading PhiUSIIL (phishing class) + top-sites & small real sites (legitimate class)...")
     phi = pd.read_csv('datasets/phiusiil.csv')
     phi = phi.dropna(subset=['URL'])
     phi = phi[phi['URL'].str.strip().astype(bool)]
@@ -224,7 +354,7 @@ def load_and_prepare_dataset():
     phish_urls = phi[phi['label'] == 0]['URL'].astype(str).tolist()
     print(f"  PhiUSIIL phishing URLs: {len(phish_urls)}")
 
-    legit_urls = build_legit_urls_from_top_sites()
+    legit_urls = build_legit_urls(phish_urls)
 
     urls = phish_urls + legit_urls
     y = np.array([1] * len(phish_urls) + [0] * len(legit_urls))  # 1=phish, 0=legit

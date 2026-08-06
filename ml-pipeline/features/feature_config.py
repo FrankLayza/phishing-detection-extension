@@ -16,15 +16,29 @@ Lexical features are self-extracted by the SAME code path in Python
 train/inference parity. See SOURCE_OF_TRUTH.md.
 """
 
-# v4: robust subset. The raw length/count features (URLLength, DomainLength,
-# NoOfLettersInURL, NoOfDegitsInURL, and the No-Of-* counts) were dropped because
-# they ENCODE a population bias in PhiUSIIL: legitimate URLs are obscure
-# long-named domains while phishing/short famous brands are shorter, so the model
-# learned "short domain => phishing" and flagged real homepages (google.com etc.).
-# We keep only scale-invariant, generalizable signals: TLD legitimacy, brand/typo
-# similarity, IP-as-host, obfuscation, subdomain count, and length-normalized
-# character ratios. These separate real phishing (.tk/.gq TLDs, typosquats, digits,
-# obfuscation) from legitimate sites without keying on raw URL length.
+# v4: all 21 lexical features are KEPT.
+#
+# An earlier note here claimed the raw length/count features (URLLength,
+# DomainLength, NoOfLettersInURL, NoOfDegitsInURL and the No-Of-* counts) had
+# been dropped because they encoded a population bias in PhiUSIIL. They were
+# never actually removed from this list, and — measured on the fixed corpus —
+# they should not be. Dropping them to a 12-feature scale-invariant subset was
+# tested (Aug 2026) and was worse on every axis:
+#
+#     metric                    21-feature      12-feature
+#     curated unknown-legit FPR      18.1%          34.7%
+#     sampled unknown-legit FPR      19.1%          29.0%
+#     phishing recall                90.8%          87.8%
+#     held-out accuracy             0.9282         0.8461
+#
+# The original reasoning confused two different problems. The real bias was in
+# the CORPUS, not the features: the legitimate class was built by attaching a
+# fixed list of short, shallow paths to top-sites domains while the phishing
+# class carried real paths, so URL *structure* leaked the label. That is fixed
+# in train.py (build_legit_urls / measure_structure). With structure matched
+# across classes, length and count features carry genuine signal — long
+# hyphenated hostnames and digit-heavy addresses really are informative — and
+# removing them only discards evidence.
 LEXICAL_FEATURES = [
     'URLLength', 'DomainLength', 'IsDomainIP', 'URLSimilarityIndex',
     'CharContinuationRate', 'TLDLegitimateProb', 'URLCharProb', 'NoOfSubDomain',

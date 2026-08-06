@@ -1,86 +1,152 @@
 {
-  "NoOfSubDomain": {
-    "importance": 0.3075525883305423,
+  "DomainLength": {
+    "importance": 0.1757322408636158,
     "category": "URL_STRUCTURE",
-    "description": "Excessive subdomain nesting (e.g. login.bank.evil.com)",
+    "description": "Length of the domain name",
     "thresholds": {
-      "high": 3,
-      "medium": 2
+      "high": 25,
+      "medium": 18
     }
   },
-  "URLCharProb": {
-    "importance": 0.1324786561038684,
-    "category": "URL_STRUCTURE",
-    "description": "Unusual character distribution in URL string",
-    "thresholds": {}
-  },
   "TLDLegitimateProb": {
-    "importance": 0.12887454812753135,
+    "importance": 0.12394070874057828,
     "category": "URL_STRUCTURE",
-    "description": "Top-level domain is associated with low-trust registrars",
+    "description": "Trust level of the domain ending (.com, .tk, etc.)",
     "thresholds": {
       "high": 0.3,
       "medium": 0.5
     }
   },
-  "SpacialCharRatioInURL": {
-    "importance": 0.12882457707719241,
-    "category": "UNKNOWN",
-    "description": "High special character density",
+  "URLCharProb": {
+    "importance": 0.09570302576911371,
+    "category": "URL_STRUCTURE",
+    "description": "How typical the character mix is for a real web address",
     "thresholds": {}
   },
   "CharContinuationRate": {
-    "importance": 0.10276000895175716,
+    "importance": 0.0923384444667771,
     "category": "URL_STRUCTURE",
-    "description": "Unusual character continuation patterns in URL",
+    "description": "Runs of repeated character types in the address",
     "thresholds": {}
   },
-  "LetterRatioInURL": {
-    "importance": 0.07987725012921934,
-    "category": "UNKNOWN",
-    "description": "Ratio of letters to total URL length",
-    "thresholds": {}
-  },
-  "DegitRatioInURL": {
-    "importance": 0.06194700740626837,
-    "category": "UNKNOWN",
-    "description": "Unusually high digit ratio in URL",
-    "thresholds": {}
-  },
-  "URLSimilarityIndex": {
-    "importance": 0.05541863844670212,
+  "NoOfSubDomain": {
+    "importance": 0.09055380123683653,
     "category": "URL_STRUCTURE",
-    "description": "Domain/path resembles a known brand (typosquatting)",
+    "description": "Number of subdomain levels (e.g. login.secure.example.com)",
     "thresholds": {
-      "high": 0.8,
-      "medium": 0.6
+      "high": 3,
+      "medium": 2
     }
   },
-  "HasObfuscation": {
-    "importance": 0.0011358009170108437,
+  "DegitRatioInURL": {
+    "importance": 0.07969266727861836,
     "category": "URL_STRUCTURE",
-    "description": "URL contains percent-encoded obfuscated characters",
+    "description": "Share of the address that is digits",
+    "thresholds": {
+      "high": 0.3,
+      "medium": 0.15
+    }
+  },
+  "LetterRatioInURL": {
+    "importance": 0.0759605384536941,
+    "category": "URL_STRUCTURE",
+    "description": "Share of the address that is letters",
     "thresholds": {}
   },
-  "ObfuscationRatio": {
-    "importance": 0.0009501621285312856,
-    "category": "UNKNOWN",
-    "description": "High proportion of obfuscated characters",
+  "NoOfDegitsInURL": {
+    "importance": 0.06065448581189309,
+    "category": "URL_STRUCTURE",
+    "description": "Count of digits in the address",
+    "thresholds": {}
+  },
+  "SpacialCharRatioInURL": {
+    "importance": 0.060077534020107,
+    "category": "URL_STRUCTURE",
+    "description": "Share of the address that is special characters",
     "thresholds": {
       "high": 0.1,
       "medium": 0.05
     }
   },
-  "IsDomainIP": {
-    "importance": 0.0001807623813764686,
+  "URLLength": {
+    "importance": 0.05003692708203374,
     "category": "URL_STRUCTURE",
-    "description": "Uses raw IP address instead of a domain name",
+    "description": "Overall length of the web address",
+    "thresholds": {
+      "high": 75,
+      "medium": 45
+    }
+  },
+  "NoOfLettersInURL": {
+    "importance": 0.04862858348069601,
+    "category": "URL_STRUCTURE",
+    "description": "Count of letters in the address",
+    "thresholds": {}
+  },
+  "URLSimilarityIndex": {
+    "importance": 0.02372237704229412,
+    "category": "URL_STRUCTURE",
+    "description": "Domain closely resembles a well-known brand (possible typosquat)",
+    "thresholds": {
+      "high": 0.8,
+      "medium": 0.6
+    }
+  },
+  "NoOfQMarkInURL": {
+    "importance": 0.00964837624502392,
+    "category": "URL_STRUCTURE",
+    "description": "Count of '?' characters (query strings)",
+    "thresholds": {}
+  },
+  "NoOfEqualsInURL": {
+    "importance": 0.006116476310527068,
+    "category": "URL_STRUCTURE",
+    "description": "Count of '=' characters (query parameters)",
+    "thresholds": {}
+  },
+  "NoOfOtherSpecialCharsInURL": {
+    "importance": 0.00590659054584304,
+    "category": "URL_STRUCTURE",
+    "description": "Count of unusual special characters",
+    "thresholds": {}
+  },
+  "NoOfAmpersandInURL": {
+    "importance": 0.001058286511925169,
+    "category": "URL_STRUCTURE",
+    "description": "Count of '&' characters (chained parameters)",
+    "thresholds": {}
+  },
+  "ObfuscationRatio": {
+    "importance": 9.062637881819701e-05,
+    "category": "URL_STRUCTURE",
+    "description": "Share of the address that is percent-encoded",
+    "thresholds": {
+      "high": 0.1,
+      "medium": 0.05
+    }
+  },
+  "HasObfuscation": {
+    "importance": 7.080988082735666e-05,
+    "category": "URL_STRUCTURE",
+    "description": "Address contains percent-encoded characters",
+    "thresholds": {}
+  },
+  "NoOfObfuscatedChar": {
+    "importance": 4.7540614450120364e-05,
+    "category": "URL_STRUCTURE",
+    "description": "Count of percent-encoded characters",
+    "thresholds": {}
+  },
+  "IsDomainIP": {
+    "importance": 1.9959266327422572e-05,
+    "category": "URL_STRUCTURE",
+    "description": "Uses a raw IP address instead of a domain name",
     "thresholds": {}
   },
   "IsHTTPS": {
     "importance": 0.0,
-    "category": "UNKNOWN",
-    "description": "Connection is not encrypted (no HTTPS)",
+    "category": "URL_STRUCTURE",
+    "description": "Whether the connection is encrypted (HTTPS)",
     "thresholds": {}
   }
 }
