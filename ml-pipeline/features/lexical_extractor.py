@@ -66,6 +66,69 @@ def extract_lexical_features(url: str) -> dict:
     
     return features
 
+# Visually confusable character substitutions used by real typosquatters
+# (paypa1 -> paypal, g00gle -> google, micros0ft -> microsoft).
+HOMOGLYPHS = {
+    '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's',
+    '7': 't', '8': 'b', '9': 'g', '$': 's', '@': 'a', '|': 'l',
+}
+
+
+def _deleet(s: str) -> str:
+    """Normalise homoglyph substitutions back to their letter form."""
+    return ''.join(HOMOGLYPHS.get(c, c) for c in s)
+
+
+def _is_doubling_of(candidate: str, brand: str) -> bool:
+    """candidate is brand with one character doubled: appple <- apple."""
+    if len(candidate) != len(brand) + 1:
+        return False
+    for i in range(len(candidate)):
+        if candidate[:i] + candidate[i + 1:] != brand:
+            continue
+        c = candidate[i]
+        if (i > 0 and candidate[i - 1] == c) or \
+           (i + 1 < len(candidate) and candidate[i + 1] == c):
+            return True
+    return False
+
+
+def _is_transposition_of(candidate: str, brand: str) -> bool:
+    """candidate is brand with two adjacent characters swapped: payapl <- paypal."""
+    if len(candidate) != len(brand):
+        return False
+    diff = [i for i in range(len(brand)) if candidate[i] != brand[i]]
+    if len(diff) != 2 or diff[1] - diff[0] != 1:
+        return False
+    i, j = diff
+    return candidate[i] == brand[j] and candidate[j] == brand[i]
+
+
+def _typo_similarity(candidate: str, brand: str) -> float:
+    """
+    Levenshtein similarity of `candidate` to `brand`, but ONLY when the
+    difference looks like deliberate typosquatting. Raw edit distance cannot
+    make this call: '/apply' vs 'apple' scores 0.80 while the real typosquat
+    '/g00gle' vs 'google' scores only 0.67. What separates them is WHICH
+    characters differ, so a near-match counts only if it is a homoglyph
+    substitution, a doubled character, or an adjacent transposition.
+    Ordinary words that happen to sit one edit away (apply, apps, amazing)
+    score 0.0.
+    """
+    if not candidate or candidate == brand:
+        return 0.0
+    normalised = _deleet(candidate)
+    gated = (
+        normalised == brand
+        or _is_doubling_of(normalised, brand)
+        or _is_transposition_of(normalised, brand)
+    )
+    if not gated:
+        return 0.0
+    dist = levenshtein(candidate, brand)
+    return 1 - (dist / max(len(candidate), len(brand)))
+
+
 def compute_brand_similarity(domain: str, url: str = '') -> float:
     """
     Detects typosquatting and path-based brand impersonation.
@@ -99,6 +162,9 @@ def compute_brand_similarity(domain: str, url: str = '') -> float:
         domain_max_sim = 0.0
 
     # --- Path portion: exact match here IS suspicious ---
+    # Near-matches are gated by _typo_similarity so ordinary English segments
+    # ('/apply', '/apps', '/amazing') score 0 while real path-based squats
+    # ('/paypa1', '/micros0ft') still score high. See _typo_similarity.
     path_max_sim = 0.0
     if url:
         path = urlparse(url).path
@@ -107,10 +173,11 @@ def compute_brand_similarity(domain: str, url: str = '') -> float:
             for brand in BRANDS:
                 if segment == brand:
                     return 1.0   # e.g. evil.com/chase/ → definite brand abuse
-                dist = levenshtein(segment, brand)
-                sim = 1 - (dist / max(len(segment), len(brand)))
+                sim = _typo_similarity(segment, brand)
                 if sim > path_max_sim:
                     path_max_sim = sim
+    if path_max_sim < TYPO_THRESHOLD:
+        path_max_sim = 0.0
 
     return max(domain_max_sim, path_max_sim)
 

@@ -49,6 +49,12 @@ function isAllowlisted(url: string): boolean {
 Promise.all([mlRunner.init(), shapApproximator.init(), initAllowlist()]).catch(console.error);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only trust messages from this extension's own content scripts, popup, or
+  // options page. Without this check any web page could post a forged
+  // ANALYZE_PAGE with hand-picked features and read back the verdict, turning
+  // the detector into an oracle for tuning evasive URLs.
+  if (sender.id !== chrome.runtime.id) return false;
+
   if (message.action === "ANALYZE_PAGE") {
     (async () => {
       try {

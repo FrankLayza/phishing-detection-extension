@@ -29,20 +29,7 @@
     "permissions": [
       "activeTab",
       "tabs",
-      "scripting",
-      "storage",
-      "notifications",
-      "declarativeNetRequest"
-    ],
-    "web_accessible_resources": [
-      {
-        "resources": [
-          "assets/*"
-        ],
-        "matches": [
-          "<all_urls>"
-        ]
-      }
+      "storage"
     ]
   },
   "pnpm": {

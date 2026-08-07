@@ -73,6 +73,61 @@ function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
+/** Visually confusable substitutions used by real typosquatters. Matches Python HOMOGLYPHS. */
+const HOMOGLYPHS: Record<string, string> = {
+  "0": "o", "1": "l", "3": "e", "4": "a", "5": "s",
+  "7": "t", "8": "b", "9": "g", $: "s", "@": "a", "|": "l",
+};
+
+/** Normalise homoglyph substitutions back to their letter form. Matches Python _deleet. */
+function deleet(s: string): string {
+  let out = "";
+  for (const c of s) out += HOMOGLYPHS[c] ?? c;
+  return out;
+}
+
+/** candidate is brand with one character doubled: appple <- apple. Matches Python. */
+function isDoublingOf(candidate: string, brand: string): boolean {
+  if (candidate.length !== brand.length + 1) return false;
+  for (let i = 0; i < candidate.length; i++) {
+    if (candidate.slice(0, i) + candidate.slice(i + 1) !== brand) continue;
+    const c = candidate[i];
+    if ((i > 0 && candidate[i - 1] === c) || (i + 1 < candidate.length && candidate[i + 1] === c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** candidate is brand with two adjacent chars swapped: payapl <- paypal. Matches Python. */
+function isTranspositionOf(candidate: string, brand: string): boolean {
+  if (candidate.length !== brand.length) return false;
+  const diff: number[] = [];
+  for (let i = 0; i < brand.length; i++) if (candidate[i] !== brand[i]) diff.push(i);
+  if (diff.length !== 2 || diff[1] - diff[0] !== 1) return false;
+  const [i, j] = diff;
+  return candidate[i] === brand[j] && candidate[j] === brand[i];
+}
+
+/**
+ * Levenshtein similarity to `brand`, but only when the difference looks like
+ * deliberate typosquatting. Raw edit distance cannot make this call: '/apply'
+ * vs 'apple' scores 0.80 while the real typosquat '/g00gle' vs 'google' scores
+ * only 0.67. What separates them is WHICH characters differ. Matches Python
+ * _typo_similarity.
+ */
+function typoSimilarity(candidate: string, brand: string): number {
+  if (!candidate || candidate === brand) return 0.0;
+  const normalised = deleet(candidate);
+  const gated =
+    normalised === brand ||
+    isDoublingOf(normalised, brand) ||
+    isTranspositionOf(normalised, brand);
+  if (!gated) return 0.0;
+  const dist = levenshtein(candidate, brand);
+  return 1 - dist / Math.max(candidate.length, brand.length);
+}
+
 /**
  * Brand similarity / typosquatting score.
  * Exact port of Python compute_brand_similarity(domain, url).
@@ -101,6 +156,9 @@ function computeBrandSimilarity(domainSld: string, url: string): number {
   if (domainMaxSim < TYPO_THRESHOLD) domainMaxSim = 0.0;
 
   // --- Path portion: exact match here IS suspicious ---
+  // Near-matches are gated by typoSimilarity so ordinary English segments
+  // ('/apply', '/apps', '/amazing') score 0 while real path-based squats
+  // ('/paypa1', '/micros0ft') still score high. Matches Python.
   let pathMaxSim = 0.0;
   // Raw path (no WHATWG percent-encoding) to match Python's urlparse().path.
   const path = rawPath(url);
@@ -108,11 +166,11 @@ function computeBrandSimilarity(domainSld: string, url: string): number {
   for (const segment of segments) {
     for (const brand of BRANDS) {
       if (segment === brand) return 1.0; // definite brand abuse
-      const dist = levenshtein(segment, brand);
-      const sim = 1 - dist / Math.max(segment.length, brand.length);
+      const sim = typoSimilarity(segment, brand);
       if (sim > pathMaxSim) pathMaxSim = sim;
     }
   }
+  if (pathMaxSim < TYPO_THRESHOLD) pathMaxSim = 0.0;
 
   return Math.max(domainMaxSim, pathMaxSim);
 }
