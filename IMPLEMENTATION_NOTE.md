@@ -4,6 +4,192 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
+## August 9, 2026 (later) — Found the real FPR cause: the legit class had no query strings
+
+**Why:** two principled fixes in a row (path brand-similarity, then the TLD table) had
+failed to move the false-positive rate. Rather than guess a third time, I ran per-instance
+SHAP on the 36 curated false positives and let the model name its own reason.
+
+### The diagnosis
+Every worst offender was a **query URL**: `takealot.com/search?q=account&page=2` (0.984),
+`firstbanknigeria.com/search?q=account&page=2` (0.974), `moniepoint.com/blog/2026/announcement`.
+Measuring the two training classes explains it exactly:
+
+| | phishing (real) | legit (synthesised) |
+|---|---|---|
+| URLs containing `?` | 6.4% | **0.0%** |
+| URLs containing `=` | 5.8% | **0.0%** |
+| digit anywhere in path | 13.8% | **0.0%** |
+
+`build_legit_urls()` synthesised paths from a bare-word vocabulary and **never emitted a
+query string or a digit**. So `?`, `=` and any path digit were *perfect* phishing tells in
+training — and every real site with a search box, pagination, or a dated article tripped
+them. This is the same class of bug as the earlier path-shape artifact, one level down:
+structure was distribution-matched, character *composition* was not.
+
+### The fix
+`_synth_query()` (new) plus digit injection in `_synth_segment()` in `train.py`, both
+calibrated to the phishing class's measured rates. Verified after the change: legit `?`
+6.7% vs phishing 6.4%, `=` 6.7% vs 5.8%, path digits 7.4% vs 13.8% (closer; the residual
+digit gap is a known follow-up).
+
+### Ablation — one change was kept, one rejected
+I also tried making the legit class mostly bare-domain (real browsing is ~100% bare, the
+corpus was 57% subdomained). Measured both arms separately:
+
+| variant | curated FPR (n=144) | **sampled FPR (n=4,000)** | recall |
+|---|---|---|---|
+| baseline | 20.8% | 20.8% | 89.9% |
+| **query/digit fix only (SHIPPED)** | 21.5% | **15.4%** | **88.8%** |
+| query fix + bare subdomains | 14.6% | 15.8% | 84.5% |
+
+The bare-subdomain arm looks better only on the 144-URL curated set, which is 100/144
+`.com`; on the corpus with statistical power it is slightly *worse* while costing 4.3
+points of recall. **Rejected**, with the reasoning recorded inline in `train.py` so it is
+not "fixed" again.
+
+### Verdict bands calibrated (`popup.tsx`)
+`sweep_thresholds.py` (new) reports FPR and recall together — the CLEAN cut governs
+recall, so moving it is a bad trade (0.65 would buy FPR at the cost of 88.8% → 80.1%
+recall). But only the **PHISHING** band is an alarming verdict, and it is nearly free to
+tune: **0.85 → 0.90** halves hard false alarms on unknown-legit sites (1.8% → 0.8%) while
+still calling 46.9% of real phishing red. CLEAN stays at 0.50. Most of the residual FPR is
+now the soft amber "be cautious" tier, not a red banner.
+
+### Net effect vs the start of the day
+| metric | before | after |
+|---|---|---|
+| sampled unknown-legit FPR (n=4,000) | 20.8% | **15.4%** |
+| full-pipeline FPR (what users meet) | 9.2% | **9.5%** |
+| hard red alarms on legit sites | 1.8% | **0.8%** |
+| phishing recall (held-out) | 89.9% | 88.8% |
+| real-world spot set | 19/20, phishing 10/10 | 19/20, **phishing 10/10** |
+| held-out accuracy | 92.6% | 91.6% |
+| 5-fold CV | 92.8% | 91.4% (±0.15%) |
+
+Held-out accuracy fell ~1 point. That is expected and *desirable*: the corpus metric was
+inflated by the leak, so removing it lowers the in-corpus number while improving behaviour
+on real sites. Say this plainly rather than quoting the old 92.6%.
+
+### Verification (all re-run)
+| Check | Result |
+|---|---|
+| `check_parity.py` — 960 URLs / 20,160 values | **0 mismatches** |
+| `npx tsc --noEmit` / `pnpm build` (chrome-mv3) | clean / succeeds |
+| `export_model_json.py` round-trip | sklearn vs JSON inference match |
+| `validate_realworld.py` | 19/20 — **phishing 10/10**; the one FP (`amazon.com/dp/...`, 0.617) is now amber, not red, and is allowlisted anyway |
+| Assets re-exported | `phishing_model.json` 19.6 MB, `shap_mapping.json` 21/21, SHAP table regenerated |
+
+### Still open
+* FPR is 15.4% (sampled) against the <10% target — better, not solved. Next lever is the
+  residual path-digit gap (7.4% legit vs 13.8% phishing) and long hyphenated domains.
+* `DomainLength` change from earlier today (SLD label instead of `SLD.TLD`) is retained;
+  it is correct in isolation but did not move the metric on its own.
+
+---
+
+## August 9, 2026 — `TLDLegitimateProb` is now data-derived; the FPR hypothesis is falsified
+
+**Why:** the Aug 7 commit named the next fix explicitly — recover the unknown-legit FPR
+from `TLDLegitimateProb`, whose 14-entry hardcoded dict sends 22% of curated legit sites
+to a flat 0.50. Implemented, measured, and the prediction **did not hold**.
+
+### The defect was two-sided, not one
+The dict penalised legitimate country suffixes (`.ng`, `.com.ng`, `.com.au` → 0.50 vs a
+US `.com`'s 0.95). Measuring the corpus showed it also **flattered hostile ones**: `.app`
+carries 6,368 phishing rows against 200 legit (true rate 0.03), `.xyz` 0.027, `.top`
+0.005 — all scored the same neutral 0.50, while `.tk` (0.019) was hand-assigned 0.10.
+The extension's hardest real case is a fresh malicious domain on exactly those suffixes.
+
+### What was built
+* **`ml-pipeline/gen_tld_rates.py`** (new): estimates a per-suffix legitimacy rate and
+  emits **both** consumers from one computation — `features/tld_rates.json` (Python) and
+  generated `src/ml/tld-rates.ts` (browser), 1,172 suffixes. All arithmetic happens at
+  generation time; runtime is a pure lookup in both languages, so parity is exact by
+  construction rather than by a hand-maintained port.
+* **Hierarchical shrinkage.** Empirical log-odds shrunk toward the *parent* suffix
+  (`edu.ng` → `ng` → global prior), weight `n/(n+M)`. Both extractors walk the same
+  hierarchy at lookup, so an unseen `sch.ng` inherits `ng` rather than a global default.
+* **Evidence population ≠ training corpus.** The first version estimated from the
+  52/48-balanced training corpus and put `.com` at **0.585** — barely above the prior —
+  because PhiUSIIL phishing is 43% `.com`. A corpus balanced for training is the wrong
+  sample for a reputation prior. Widened to a deeper top-1m slice, held **disjoint from
+  both the held-out test split and the sampled-validation band** so neither metric is
+  compromised. `.com` → 0.763.
+* **M = 100, swept not chosen.** No dataset can estimate `com.ng`: all of top-1m holds
+  34 such domains against 59 phishing rows. Maximum likelihood reads 0.14 there and
+  flagged **8/8** curated `com.ng` sites. M = 100 keeps sparse regional suffixes neutral
+  (`com.ng` 0.477) while high-volume hostile ones keep signal (`.app` 0.095, `.top`
+  0.030, `.xyz` 0.292, `.tk` 0.147). M = 300 washes `.tk` out to 0.345.
+
+### MEASURED OUTCOME — the metric moved the wrong way
+
+| variant | curated ML FPR | sampled ML FPR | held-out acc | recall |
+|---|---|---|---|---|
+| baseline (hardcoded dict) | **20.8%** | 20.8% | 92.58% | 89.86% |
+| narrow evidence, M=300 | 23.6% | 20.6% | 93.22% | 90.44% |
+| **wide evidence, M=100 (shipped)** | 24.3% | **19.6%** | 92.97% | 89.84% |
+| wide evidence, M=300 | 25.0% | 20.0% | 93.05% | 90.05% |
+
+**Cause:** the curated corpus is 100/144 `.com` URLs. The dict's hardcoded 0.95 was, for
+that population, a better number than the honest empirical 0.763 — it functioned as a
+hand-tuned prior favouring exactly the sites the corpus contains. Sampled FPR (n=4,000,
+the figure with statistical power) did improve, 20.8% → 19.6%.
+
+**Kept anyway.** 1,172 suffixes scored on evidence beats 14 plus a coin flip, and the
+hostile-suffix half of the fix is a real detection gain that the curated corpus does not
+measure. Same reasoning as the Aug 7 path-similarity fix: a metric that improves because
+a feature is wrong in a flattering direction is not a metric worth protecting. **The Aug
+7 hypothesis is falsified — do not restate it as confirmed.**
+
+### The residual is `DomainLength`, not this feature
+With the TLD feature neutral for `com.ng` (0.477), those sites are *still* 7/8 flagged
+(`gtbank.com.ng/personal-banking` = 0.678). Feature-by-feature comparison against the
+`.com` curated set shows the gap is `DomainLength`/`URLLength`: compound suffixes are
+mechanically longer, so the feature encodes suffix structure as risk. SHAP confirms it
+independently — `DomainLength` value↔SHAP correlation strengthened +0.14 → **+0.32**.
+That is the next FPR item.
+
+### Parity harness could pass on a stale artifact — fixed
+`gen_parity_features.mjs` imported a hand-built `__parity_bundle.mjs`. When
+`tld-rates.ts` landed it reported **960 divergences** against extractor code that had
+never been recompiled — the same trap that produced 287 false divergences on Aug 7. It
+now rebuilds the bundle via esbuild's **JS API** on every run (the CLI path fails:
+Node ≥20 refuses to `spawnSync` a `.CMD` shim on Windows, and pnpm's strict layout keeps
+esbuild in `.pnpm/`, not `node_modules/esbuild`). A gate that can pass on a stale
+artifact is not a gate.
+
+### 5-fold CV is now persisted
+`train.py` computed CV every run but only `print()`ed it, which is why SOT carried "do
+not cite a CV number" against a figure that was in fact measured every run. It now writes
+`models/cv_results.json`: **92.84% (±0.33%, 2σ)**.
+
+### Verification (all re-run, not cited from docs)
+| Check | Result |
+|---|---|
+| `check_parity.py` — 960 URLs / 20,160 values | **0 mismatches** |
+| `npx tsc --noEmit` / `plasmo build` (chrome-mv3) | clean / succeeds in ~32 s |
+| Held-out | acc 92.97%, prec 95.21%, recall 89.84%, TN=21,087 FP=913 |
+| `validate_realworld.py` | 19/20 — phishing **10/10**, one ML-tier `.com` FP |
+| Retrain determinism | identical metrics, identical forest (691,570 nodes), **byte-identical** `phishing_model.json` |
+| Assets re-exported | `phishing_model.json` 19.4 MB → **16.8 MB**, `shap_mapping.json` 21/21 |
+
+The one real-world FP is `amazon.com/dp/B08N5WRWNW` (ASIN token). `amazon.com` is in the
+30k allowlist and short-circuits to CLEAN before the ML tier, so the shipped extension is
+unaffected — verified by reading the tier order in `background/index.ts`, not assumed.
+
+### Still open (unchanged by this pass)
+* Unknown-legit FPR 19.6–24.3% vs the <10% target. Now attributable: `DomainLength` on
+  compound suffixes, plus long hyphenated domains under-supported in both classes.
+* Verdict thresholds still uncalibrated (CLEAN <0.50); the 0.60/0.65 sweep is documented
+  but not applied — still a product decision.
+* SOT's previously published curated FPR (18.1%) **could not be reproduced**: the
+  unmodified pre-change model measured **20.8%** at the start of this session. `models/`
+  is untracked so the old JSON is unrecoverable; 20.8% is the honest baseline.
+* `cross_validate_ts.mjs` still prints stale v3 text.
+
+---
+
 ## August 6, 2026 — Verification pass: doc/artifact drift corrected, SHAP regenerated
 
 **Why:** Re-verified the Aug 5 parity work against the live repo rather than the write-ups.

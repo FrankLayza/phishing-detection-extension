@@ -1,18 +1,45 @@
+import json
+import os
 import re
 import math
 from urllib.parse import urlparse
 import tldextract
 
-BRANDS = ['google', 'microsoft', 'apple', 'amazon', 'facebook', 
+BRANDS = ['google', 'microsoft', 'apple', 'amazon', 'facebook',
           'paypal', 'netflix', 'bankofamerica', 'chase', 'wellsfargo']
 
-TLD_SCORES = {
-    'com': 0.95, 'org': 0.90, 'net': 0.85,
-    'edu': 0.98, 'gov': 0.99, 'co.uk': 0.90,
-    'de': 0.92, 'fr': 0.91, 'jp': 0.93,
-    'tk': 0.10, 'ml': 0.15, 'ga': 0.15,
-    'cf': 0.15, 'gq': 0.15
-}
+# Per-suffix legitimacy rates for TLDLegitimateProb, measured on the training
+# rows and shrunk toward the corpus prior. GENERATED — regenerate with
+# `python ml-pipeline/gen_tld_rates.py`. Replaces a 14-entry hardcoded dict
+# whose flat 0.50 default penalised legitimate country suffixes (.ng, .com.au)
+# and flattered hostile ones (.app, .xyz, .top). The browser reads the same
+# numbers from phishing-extension/src/ml/tld-rates.ts, emitted by the same
+# generator, so train and serve agree by construction.
+_RATES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'tld_rates.json')
+with open(_RATES_PATH, encoding='utf-8') as _f:
+    _TLD_RATES_DATA = json.load(_f)
+
+TLD_SCORES = _TLD_RATES_DATA['rates']
+# Unknown suffixes inherit the measured corpus base rate, not an arbitrary 0.50.
+TLD_PRIOR = _TLD_RATES_DATA['prior']
+
+
+def tld_legitimate_rate(suffix: str) -> float:
+    """
+    Legitimacy rate for a registered suffix, walking the suffix hierarchy:
+    exact match, then successively shorter parents, then the corpus prior.
+    So a suffix never seen in training ('sch.ng') inherits 'ng' rather than a
+    global default. Ported 1:1 to tldLegitimateRate() in feature-extractor.ts.
+    """
+    s = (suffix or '').lower()
+    while s:
+        if s in TLD_SCORES:
+            return TLD_SCORES[s]
+        if '.' not in s:
+            break
+        s = s.split('.', 1)[1]
+    return TLD_PRIOR
 
 def extract_lexical_features(url: str) -> dict:
     url = url.strip().lower()
@@ -28,14 +55,21 @@ def extract_lexical_features(url: str) -> dict:
     
     features = {}
     features['URLLength'] = len(url)
-    features['DomainLength'] = len(domain)
+    # DomainLength measures the registrable second-level label, NOT the full
+    # SLD.TLD. A compound suffix (.com.ng, .co.uk) mechanically adds characters
+    # to SLD.TLD, so the old definition let the model read suffix *structure*
+    # as risk — the diagnosed regional-FPR mechanism (gtbank.com.ng scored
+    # phishing on length alone). The label (the brand/org name) is the
+    # meaningful length signal, and it is identical across a site's TLD
+    # variants. Mirrored 1:1 in feature-extractor.ts.
+    features['DomainLength'] = len(extracted.domain) if extracted.domain else len(domain)
     
     ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
     features['IsDomainIP'] = 1 if re.match(ip_pattern, parsed.netloc.split(':')[0]) else 0
     
     features['URLSimilarityIndex'] = compute_brand_similarity(domain, url)
     features['CharContinuationRate'] = continuation_rate(url)
-    features['TLDLegitimateProb'] = TLD_SCORES.get(extracted.suffix.lower(), 0.50)
+    features['TLDLegitimateProb'] = tld_legitimate_rate(extracted.suffix)
     features['URLCharProb'] = char_probability(url)
     
     subdomain_parts = extracted.subdomain.split('.') if extracted.subdomain else []

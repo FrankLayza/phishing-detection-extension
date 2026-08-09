@@ -24,7 +24,8 @@ borderline scores only.
     and ~50 ms Python inference. max_depth=None allows trees to grow to depth ~35–45
     on 200k samples. Capping at 20 with min_samples_leaf=4 reduces the export to
     19.4 MB with <1% accuracy cost.
-- **Verdict tiers:** CLEAN `< 0.50`, SUSPICIOUS `0.50–0.85`, PHISHING `≥ 0.85`
+- **Verdict tiers:** CLEAN `< 0.50`, SUSPICIOUS `0.50–0.90`, PHISHING `≥ 0.90`
+  (calibrated Aug 9, 2026 — see §3a; the PHISHING cut was `0.85` before)
 - **Scaler:** sklearn `MinMaxScaler`. The browser applies the **real sklearn formula
   `scaled = raw * scale_ + min_`** (NOT `clip(x/data_max)` — that PRD claim is wrong
   for the shipped model, whose `min_` has negative values). `rf-inference.ts` already
@@ -35,54 +36,101 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 
 | Metric | Value |
 |---|---|
-| Accuracy | 92.82% |
-| Precision | 94.66% |
-| Recall | 90.07% |
-| F1 | 92.31% |
-| False Positive Rate | 4.66% |
-| False Negative Rate | 9.93% |
-| 5-fold CV accuracy | *not persisted — see note* |
+| Accuracy | 91.58% |
+| Precision | 93.28% |
+| Recall | 88.80% |
+| F1 | 90.98% |
+| False Positive Rate | 5.87% |
+| False Negative Rate | 11.20% |
+| 5-fold CV accuracy | 91.43% (±0.15%) |
 
-**Confusion matrix:** TN=20,974 | FP=1,026 | FN=2,005 | TP=18,184
+**Confusion matrix:** TN=20,708 | FP=1,292 | FN=2,261 | TP=17,928
 
-> These are the **post-corpus-fix** numbers (model retrained Aug 5, 2026). The previous
-> v4 figures (94.02% / 95.14% / 92.21%, FP=951) came from the pre-fix model whose
-> legitimate class carried the URL-structure artifact — they are superseded, not
-> comparable. Accuracy fell 1.2 points while real-world unknown-legit FPR fell by two
-> thirds; see §3a. Regenerate with `python ml-pipeline/train.py`.
+> These are the **query/digit-leak-fix** numbers (retrained Aug 9, 2026, later session).
+> The data-derived-TLD figures (92.97% / 95.21% / 89.84%, FP=913) are superseded.
 >
-> **5-fold CV:** `train.py` computes it but only `print()`s it — no artifact backs it.
-> The old "93.85% (±0.11%)" was a pre-fix stdout figure and has been removed rather
-> than restated. Do not cite a CV number until it is persisted to
-> `models/evaluation_results.json`.
+> **Accuracy fell ~1.4 points and that is the intended result, not a regression.** The
+> synthesised legitimate class contained no query strings and no path digits, so `?`, `=`
+> and digits were perfect phishing tells *inside the corpus*. Held-out accuracy was partly
+> measuring that leak. Closing it lowers the in-corpus number while cutting the
+> false-positive rate on real unseen sites by a quarter (§3a). Quote both together; do not
+> cite the old 92.97% as if it were comparable.
+>
+> **5-fold CV is now persisted** (Aug 9, 2026). `train.py` computed it every run but
+> only `print()`ed it, which is why this section previously said "do not cite a CV
+> number". It now writes `models/cv_results.json` (mean, std, per-fold), so 92.84%
+> (±0.33%, 2σ) is artifact-backed. The old "93.85% (±0.11%)" remains superseded — it
+> was a pre-corpus-fix stdout figure.
+>
+> Training is fully seeded (`random_state=42` on the split, SMOTE and the forest).
+> Verified by re-running: identical metrics, identical forest (691,570 nodes, matching
+> thresholds) and a **byte-identical** `phishing_model.json`. Only `random_forest.pkl`
+> changes hash between runs, from joblib serialization metadata rather than model
+> content — so don't treat a `.pkl` hash difference as a changed model.
 
 ### 3a. Unknown-legitimate FPR — the metric that actually gates the product
 Held-out accuracy measures the corpus, not the goal. The legitimate class is partly
 synthesized, so in-corpus accuracy stays high while genuinely unseen legitimate sites
 fail. Measured by `validate_unknown_legit.py` → `models/unknown_legit_validation.json`:
 
-| Set | n | ML-tier FPR | Full-pipeline FPR |
-|---|---|---|---|
-| Curated regional (banks, fintech, SMB) | 144 | **18.1%** | 13.2% |
-| Sampled top-1m, rank ≥120k | 4,000 | **19.1%** | 8.1% |
+| Set | n | ML-tier FPR | Full-pipeline FPR | Hard red alarms |
+|---|---|---|---|---|
+| Curated regional (banks, fintech, SMB) | 144 | 21.5% | 16.7% | **0.7%** |
+| Sampled top-1m, rank ≥120k | 4,000 | **15.4%** | 9.5% | **0.8%** |
 
-Roughly **1 in 5 unknown legitimate sites is flagged by the ML tier**, against a <10%
-target. Phishing detection is not the weak side (90.1% held-out recall, 10/10 on the
-real-world phishing spot set) — false positives on legitimate sites are. Residual
-failures concentrate in long hyphenated domains (`oakwood-dental-clinic.com`), rare in
-both training classes. The allowlist cannot close this: gtbank.com is rank ~380k,
-flutterwave.com ~687k; covering them needs ~700k entries (~10 MB) vs the current
-30k/456 KB. **Verdict thresholds have never been calibrated against FPR** — the
-documented sweep (0.60 → 11.8%/13.7% FPR at 86.2% recall; 0.65 → 11.8%/11.8% at 82.4%)
-is a pending product decision, not applied.
+> Measured Aug 9, 2026 (later session) on the query/digit-leak-fix model. The measured
+> pre-change baseline was **20.8%** on both populations. Cite the **sampled** row as the
+> headline: n=4,000 has statistical power, n=144 does not, and the curated set is
+> 100/144 `.com` so it moves on composition rather than on real effects.
+>
+> An older SOT figure of 18.1% curated **could not be reproduced** (the unmodified model
+> measured 20.8%); `models/` is untracked so the earlier JSON is unrecoverable. Baseline
+> is 20.8%; cite nothing older.
+
+**The root cause was a corpus leak, found by asking the model.** After two principled
+feature fixes failed to move this number, per-instance SHAP on the 36 curated false
+positives named the reason: every worst offender was a query URL
+(`takealot.com/search?q=account&page=2`, 0.984). The synthesised legitimate class
+contained `?` in **0.0%** of URLs against phishing's 6.4%, `=` in 0.0% against 5.8%, and
+path digits in 0.0% against 13.8% — so punctuation and digits were perfect phishing tells
+in training, and every real site with a search box, pagination or a dated article tripped
+them. Fixed in `train.py` (`_synth_query()` + digit injection, calibrated to the phishing
+rates). Sampled FPR 20.8% → **15.4%** for 1.1 points of recall.
+
+**Verdict bands are now calibrated** (`models/threshold_sweep.json`, from
+`sweep_thresholds.py`). The CLEAN cut governs recall, so it stays at 0.50 — raising it to
+0.65 would cost 8.7 points of phishing caught (88.8% → 80.1%) to buy FPR that the middle
+tier handles more safely. The **PHISHING** cut moved 0.85 → **0.90**, halving hard red
+alarms on unknown-legit sites (1.8% → 0.8%) while still calling 46.9% of real phishing
+red. Most residual FPR is now the amber "be cautious" tier, which does not block
+navigation — that distinction matters more to users than the headline FPR.
+
+Still above the <10% ML-tier target. Remaining drivers: the residual path-digit gap (7.4%
+legit vs 13.8% phishing) and long hyphenated domains (`oakwood-dental-clinic.com`), rare
+in both classes. The allowlist cannot close it: gtbank.com is rank ~380k, flutterwave.com
+~687k; covering them needs ~700k entries (~10 MB) vs the current 30k/456 KB.
+
+**A rejected variant, recorded so it is not retried.** Making the legit class mostly
+bare-domain improved curated FPR (21.5% → 14.6%) but made sampled FPR slightly *worse*
+(15.4% → 15.8%) while costing 4.3 points of recall (88.8% → 84.5%). The curated gain was a
+composition artifact. Full ablation table in IMPLEMENTATION_NOTE.md.
+
+**Do not describe the Aug 7 "recover FPR via TLDLegitimateProb" hypothesis as confirmed;
+it was falsified by measurement.** The TLD table is retained on correctness grounds
+(1,172 suffixes scored on evidence vs 14 plus a coin flip), not because it improved this
+metric.
 
 **Real-world spot validation** (`validate_realworld.py`, 20 curated URLs):
 - Overall: 19/20 correct (95.0%)
-- Safe URLs: 9/10 — one FP: `amazon.com/dp/B08N5WRWNW` (long product path)
+- Safe URLs: 9/10 — one FP: `amazon.com/dp/B08N5WRWNW` (ASIN token `B08N5WRWNW`
+  raises `DegitRatioInURL` and caps-continuation). **ML-tier only:** `amazon.com` is in
+  the 30k allowlist and short-circuits to CLEAN before the ML tier runs, so the shipped
+  extension is unaffected. Confirmed by reading the tier order, not assumed.
 - Phishing URLs: 10/10 — all correctly flagged with p ≥ 0.66
 
-**Model size:** `phishing-extension/assets/phishing_model.json` = **19,863 KB (19.4 MB)**
-(down from 175.8 MB with the previous 300-tree, unbounded-depth config)
+**Model size:** `phishing-extension/assets/phishing_model.json` = **17,183 KB (16.8 MB)**
+(down from 175.8 MB with the previous 300-tree, unbounded-depth config; 19.4 MB → 16.8 MB
+at this retrain, since data-derived TLD values split more cleanly than a 0.50 default)
 
 **Inference latency** (`benchmark_inference.py`, 1000 single-URL runs):
 | Path | Mean | Median | P95 |
@@ -107,20 +155,65 @@ train/serve skew). Fixed Aug 2026 by a 1:1 `tldextract` port in TS
 (`src/ml/tldextract.ts` + generated `src/ml/psl-trie.ts`). Regenerate the PSL data with
 `python ml-pipeline/gen_psl_trie.py` whenever the Python PSL updates, and re-run:
 `node ml-pipeline/gen_parity_features.mjs && python ml-pipeline/check_parity.py`.
+`gen_parity_features.mjs` now rebuilds its own esbuild bundle on every run — before
+Aug 9 it read a hand-built `__parity_bundle.mjs`, so a stale bundle could report
+PARITY OK against extractor code that was never compiled. Do not reintroduce a
+manual prebuild step.
+
+**`TLDLegitimateProb` is a generated table, not a formula** (Aug 9, 2026). The same
+14-entry dict also *supplied* this feature's value, defaulting every unlisted suffix
+to a flat 0.50 — 22% of curated legit sites, and also `.app` (6,368 phishing rows vs
+200 legit), `.xyz` and `.top`, which the dict scored as neutral as `.org`. Replaced by
+`ml-pipeline/gen_tld_rates.py`, which estimates a per-suffix legit rate with
+hierarchical shrinkage toward the parent suffix (`edu.ng` → `ng` → global prior) and
+emits **both** consumers from one computation: `features/tld_rates.json` for Python and
+generated `src/ml/tld-rates.ts` for the browser. All arithmetic happens at generation
+time, so runtime is a pure lookup in both languages and parity is exact by construction.
+Regenerate with `python ml-pipeline/gen_tld_rates.py`, then re-run the parity harness,
+`train.py`, `export_model_json.py` and `gen_shap_mapping.py` — the feature's values
+change, so the model **must** be retrained.
+
+Two properties of that estimator are load-bearing and easy to get wrong:
+
+* **Evidence population ≠ training corpus.** Rates are estimated from a wider legit
+  slice (deeper top-1m ranks) than the 52/48-balanced training corpus, and that slice
+  is held **disjoint from both the held-out test split and the sampled-validation
+  band** so neither metric is compromised. Estimating from the balanced corpus instead
+  put `.com` at 0.585, since a corpus balanced for training is the wrong sample from
+  which to estimate a reputation prior.
+* **Shrinkage M = 100, chosen by sweep against the FPR metric, not by taste.** No
+  dataset can estimate `com.ng`: all of top-1m holds 34 such domains against PhiUSIIL's
+  59 phishing rows. Maximum likelihood reads 0.14 there and flagged 8/8 curated
+  `com.ng` sites. M = 100 keeps sparse regional suffixes near-neutral (`com.ng` 0.477)
+  while high-volume hostile ones keep full signal (`.app` 0.095, `.top` 0.030,
+  `.xyz` 0.292, `.tk` 0.147). At M = 300 `.tk` washes out to 0.345.
 
 **SHAP (exact TreeExplainer, 500 seeded held-out samples)** — `models/shap_values.json`,
 generated by `ml-pipeline/gen_shap_table.py`. Top 5 by mean|SHAP|:
 
 | Feature | mean\|SHAP\| | value↔SHAP corr | Direction |
 |---|---|---|---|
-| TLDLegitimateProb | 0.0789 | −0.85 | lower TLD trust → phishing |
-| NoOfSubDomain | 0.0758 | **−0.84** | **fewer** subdomains → phishing |
-| DegitRatioInURL | 0.0515 | +0.73 | more digits → phishing |
-| DomainLength | 0.0491 | +0.14 | mixed / context-dependent |
-| CharContinuationRate | 0.0489 | +0.72 | more repetition → phishing |
+| TLDLegitimateProb | 0.1191 | −0.93 | lower TLD trust → phishing |
+| NoOfSubDomain | 0.0714 | **−0.84** | **fewer** subdomains → phishing |
+| DegitRatioInURL | 0.0476 | +0.71 | more digits → phishing |
+| DomainLength | 0.0468 | +0.32 | longer domain → phishing |
+| CharContinuationRate | 0.0415 | +0.70 | more repetition → phishing |
 
-> Regenerated Aug 6, 2026 against the post-corpus-fix model. The earlier table
-> (`NoOfSubDomain` #1 at 0.1770) was computed on the pre-fix model and is superseded.
+> Regenerated Aug 9, 2026 against the data-derived-TLD model. The Aug 6 table
+> (`TLDLegitimateProb` at 0.0789, `DomainLength` r = +0.14) was computed before
+> that change and is superseded; the Aug 4 table (`NoOfSubDomain` #1 at 0.1770)
+> predates the corpus fix. `TLDLegitimateProb` **increased** its dominance when
+> the hardcoded dict was replaced (0.0789 → 0.1191, r −0.85 → −0.93): with 1,172
+> suffixes scored on evidence instead of 14 plus a 0.50 default, the feature
+> now carries real information across the whole corpus rather than for 14 TLDs.
+> One model decision in four traces to this single feature — a concentration
+> worth stating as a limitation, not a strength.
+>
+> **`DomainLength` is now the regional false-positive driver.** Its correlation
+> strengthened +0.14 → +0.32, and with the TLD feature neutral for `com.ng`
+> (0.477) it is what still flags `gtbank.com.ng` at 0.678. Compound suffixes are
+> mechanically longer than `.com`, so the feature encodes suffix structure as
+> risk. This is the next FPR item and is **not** fixed by the TLD work.
 >
 > **`NoOfSubDomain` still runs OPPOSITE to the phishing literature.** The corpus fix
 > demoted it in *permutation* importance (#1 → #5, 0.256 → 0.091) but did **not** correct

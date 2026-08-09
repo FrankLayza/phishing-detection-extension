@@ -1,15 +1,6 @@
 {
-  "DomainLength": {
-    "importance": 0.1757322408636158,
-    "category": "URL_STRUCTURE",
-    "description": "Length of the domain name",
-    "thresholds": {
-      "high": 25,
-      "medium": 18
-    }
-  },
   "TLDLegitimateProb": {
-    "importance": 0.12394070874057828,
+    "importance": 0.29832809195916027,
     "category": "URL_STRUCTURE",
     "description": "Trust level of the domain ending (.com, .tk, etc.)",
     "thresholds": {
@@ -17,20 +8,23 @@
       "medium": 0.5
     }
   },
+  "DomainLength": {
+    "importance": 0.1250958739583396,
+    "category": "URL_STRUCTURE",
+    "description": "Length of the domain name",
+    "thresholds": {
+      "high": 25,
+      "medium": 18
+    }
+  },
   "URLCharProb": {
-    "importance": 0.09570302576911371,
+    "importance": 0.09370829724064818,
     "category": "URL_STRUCTURE",
     "description": "How typical the character mix is for a real web address",
     "thresholds": {}
   },
-  "CharContinuationRate": {
-    "importance": 0.0923384444667771,
-    "category": "URL_STRUCTURE",
-    "description": "Runs of repeated character types in the address",
-    "thresholds": {}
-  },
   "NoOfSubDomain": {
-    "importance": 0.09055380123683653,
+    "importance": 0.07922711583704524,
     "category": "URL_STRUCTURE",
     "description": "Number of subdomain levels (e.g. login.secure.example.com)",
     "thresholds": {
@@ -38,8 +32,20 @@
       "medium": 2
     }
   },
+  "CharContinuationRate": {
+    "importance": 0.07458206235962586,
+    "category": "URL_STRUCTURE",
+    "description": "Runs of repeated character types in the address",
+    "thresholds": {}
+  },
+  "LetterRatioInURL": {
+    "importance": 0.06295166977084364,
+    "category": "URL_STRUCTURE",
+    "description": "Share of the address that is letters",
+    "thresholds": {}
+  },
   "DegitRatioInURL": {
-    "importance": 0.07969266727861836,
+    "importance": 0.05344417442551506,
     "category": "URL_STRUCTURE",
     "description": "Share of the address that is digits",
     "thresholds": {
@@ -47,20 +53,8 @@
       "medium": 0.15
     }
   },
-  "LetterRatioInURL": {
-    "importance": 0.0759605384536941,
-    "category": "URL_STRUCTURE",
-    "description": "Share of the address that is letters",
-    "thresholds": {}
-  },
-  "NoOfDegitsInURL": {
-    "importance": 0.06065448581189309,
-    "category": "URL_STRUCTURE",
-    "description": "Count of digits in the address",
-    "thresholds": {}
-  },
   "SpacialCharRatioInURL": {
-    "importance": 0.060077534020107,
+    "importance": 0.05143061811243339,
     "category": "URL_STRUCTURE",
     "description": "Share of the address that is special characters",
     "thresholds": {
@@ -68,8 +62,14 @@
       "medium": 0.05
     }
   },
+  "NoOfDegitsInURL": {
+    "importance": 0.047603087564180635,
+    "category": "URL_STRUCTURE",
+    "description": "Count of digits in the address",
+    "thresholds": {}
+  },
   "URLLength": {
-    "importance": 0.05003692708203374,
+    "importance": 0.04436110760553936,
     "category": "URL_STRUCTURE",
     "description": "Overall length of the web address",
     "thresholds": {
@@ -78,13 +78,31 @@
     }
   },
   "NoOfLettersInURL": {
-    "importance": 0.04862858348069601,
+    "importance": 0.04221575442400324,
     "category": "URL_STRUCTURE",
     "description": "Count of letters in the address",
     "thresholds": {}
   },
+  "NoOfOtherSpecialCharsInURL": {
+    "importance": 0.010051125733902367,
+    "category": "URL_STRUCTURE",
+    "description": "Count of unusual special characters",
+    "thresholds": {}
+  },
+  "NoOfEqualsInURL": {
+    "importance": 0.0077118731544990075,
+    "category": "URL_STRUCTURE",
+    "description": "Count of '=' characters (query parameters)",
+    "thresholds": {}
+  },
+  "NoOfQMarkInURL": {
+    "importance": 0.003845440778195882,
+    "category": "URL_STRUCTURE",
+    "description": "Count of '?' characters (query strings)",
+    "thresholds": {}
+  },
   "URLSimilarityIndex": {
-    "importance": 0.02372237704229412,
+    "importance": 0.002905811128109321,
     "category": "URL_STRUCTURE",
     "description": "Domain closely resembles a well-known brand (possible typosquat)",
     "thresholds": {
@@ -92,32 +110,20 @@
       "medium": 0.6
     }
   },
-  "NoOfQMarkInURL": {
-    "importance": 0.00964837624502392,
-    "category": "URL_STRUCTURE",
-    "description": "Count of '?' characters (query strings)",
-    "thresholds": {}
-  },
-  "NoOfEqualsInURL": {
-    "importance": 0.006116476310527068,
-    "category": "URL_STRUCTURE",
-    "description": "Count of '=' characters (query parameters)",
-    "thresholds": {}
-  },
-  "NoOfOtherSpecialCharsInURL": {
-    "importance": 0.00590659054584304,
-    "category": "URL_STRUCTURE",
-    "description": "Count of unusual special characters",
-    "thresholds": {}
-  },
   "NoOfAmpersandInURL": {
-    "importance": 0.001058286511925169,
+    "importance": 0.0021881487756894385,
     "category": "URL_STRUCTURE",
     "description": "Count of '&' characters (chained parameters)",
     "thresholds": {}
   },
+  "HasObfuscation": {
+    "importance": 0.00015931007023602505,
+    "category": "URL_STRUCTURE",
+    "description": "Address contains percent-encoded characters",
+    "thresholds": {}
+  },
   "ObfuscationRatio": {
-    "importance": 9.062637881819701e-05,
+    "importance": 8.630502882903533e-05,
     "category": "URL_STRUCTURE",
     "description": "Share of the address that is percent-encoded",
     "thresholds": {
@@ -125,22 +131,16 @@
       "medium": 0.05
     }
   },
-  "HasObfuscation": {
-    "importance": 7.080988082735666e-05,
+  "IsDomainIP": {
+    "importance": 5.389198244570131e-05,
     "category": "URL_STRUCTURE",
-    "description": "Address contains percent-encoded characters",
+    "description": "Uses a raw IP address instead of a domain name",
     "thresholds": {}
   },
   "NoOfObfuscatedChar": {
-    "importance": 4.7540614450120364e-05,
+    "importance": 5.024009075875455e-05,
     "category": "URL_STRUCTURE",
     "description": "Count of percent-encoded characters",
-    "thresholds": {}
-  },
-  "IsDomainIP": {
-    "importance": 1.9959266327422572e-05,
-    "category": "URL_STRUCTURE",
-    "description": "Uses a raw IP address instead of a domain name",
     "thresholds": {}
   },
   "IsHTTPS": {

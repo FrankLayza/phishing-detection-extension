@@ -275,9 +275,19 @@ function labelFor(raw: string): { name: string; tag: string } {
 // ── Verdict config ────────────────────────────────────────────────────────
 type VKey = "CLEAN" | "SUSPICIOUS" | "PHISHING"
 
+// Verdict bands, calibrated Aug 9 2026 against the unknown-legit corpus
+// (ml-pipeline/sweep_thresholds.py -> models/threshold_sweep.json).
+//
+// Only the PHISHING band is a hard, alarming verdict, so it is the one that
+// has to be conservative: at the old 0.85 cut, 1.8% of unknown-legitimate
+// sites were shown a red "likely phishing" banner; 0.90 halves that to 0.8%
+// while still calling 46.9% of real phishing red. The CLEAN cut stays at 0.50
+// because it — not the PHISHING cut — governs recall, and raising it to 0.65
+// would have cost 8.7 points of phishing caught (88.8% -> 80.1%) to buy FPR
+// the middle tier already handles more safely.
 function verdictFor(score: number): VKey {
   if (score < 0.5)  return "CLEAN"
-  if (score <= 0.85) return "SUSPICIOUS"
+  if (score < 0.90) return "SUSPICIOUS"
   return "PHISHING"
 }
 

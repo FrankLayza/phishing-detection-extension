@@ -263,7 +263,44 @@ def _synth_segment(rng, target_len):
         seg = seg + joiner + BENIGN_SEGMENTS[rng.randint(len(BENIGN_SEGMENTS))]
     if len(seg) > target_len and target_len >= 3:
         seg = seg[:target_len].rstrip('-_')
+    # Real legit paths carry digits — years, page numbers, article and product
+    # IDs (/blog/2026/, /page/2, /dp/B08N5WRWNW). The benign vocabulary is all
+    # bare words, so before this the synthesised legit class had digits in 0.0%
+    # of paths against phishing's 13.8%, making "any digit in path" a perfect
+    # phishing tell. Match phishing's measured rate so digits carry no label.
+    if rng.random() < 0.14:
+        kind = rng.random()
+        if kind < 0.4:
+            seg = str(2015 + rng.randint(12))           # year
+        elif kind < 0.7:
+            seg = seg + '-' + str(1 + rng.randint(500))  # slug-with-id
+        else:
+            seg = str(1 + rng.randint(99999))            # numeric id
     return seg or 'page'
+
+
+# Benign query keys/values seen on real sites. Phishing carries '?' on 6.4% of
+# URLs and '=' on 5.8%; the synthesised legit class carried both on 0.0%, so
+# NoOfQMarkInURL / NoOfEqualsInURL were pure label leaks and any real search or
+# paginated URL (?q=account&page=2) was forced toward PHISHING.
+BENIGN_QUERY_KEYS = ['q', 'page', 'id', 'ref', 'lang', 'sort', 'category',
+                     'search', 'view', 'tab', 'utm_source', 'p']
+BENIGN_QUERY_VALS = ['account', 'login', 'help', 'news', 'all', 'newest',
+                     'en', 'us', 'home', 'list', 'google', 'summer-sale']
+
+
+def _synth_query(rng):
+    """Build a benign query string, mirroring real search/pagination URLs."""
+    n = 1 if rng.random() < 0.65 else 2
+    parts = []
+    for _ in range(n):
+        k = BENIGN_QUERY_KEYS[rng.randint(len(BENIGN_QUERY_KEYS))]
+        if rng.random() < 0.35:
+            v = str(1 + rng.randint(200))
+        else:
+            v = BENIGN_QUERY_VALS[rng.randint(len(BENIGN_QUERY_VALS))]
+        parts.append(f'{k}={v}')
+    return '?' + '&'.join(parts)
 
 
 def _synth_sub_label(rng, target_len):
@@ -318,6 +355,15 @@ def build_legit_urls(phish_urls, random_state=42):
             continue
         host = d
         # Subdomain count sampled from the phishing distribution, filled benignly.
+        #
+        # Forcing the legit class to be mostly BARE (matching real browsing,
+        # where users visit example.com not sub.example.com) was tested and
+        # REJECTED: it improved the 144-URL curated FPR (21.5% -> 14.6%) but
+        # made the n=4,000 sampled FPR slightly worse (15.4% -> 15.8%) while
+        # costing 4.3 points of phishing recall (88.8% -> 84.5%). The curated
+        # gain was a composition artifact (100/144 of it is .com). Distribution
+        # matching stays; do not "fix" this again without re-running both
+        # populations. See IMPLEMENTATION_NOTE.md (Aug 9 ablation table).
         n_sub = int(sub_counts[rng.randint(len(sub_counts))])
         if len(host.split('.')) == 2 and n_sub > 0:
             labels = [_synth_sub_label(rng, int(sub_lens[rng.randint(len(sub_lens))]))
@@ -330,6 +376,10 @@ def build_legit_urls(phish_urls, random_state=42):
             segs = [_synth_segment(rng, int(seg_lens[rng.randint(len(seg_lens))]))
                     for _ in range(depth)]
             tail = '/' + '/'.join(segs)
+            # Query strings at phishing's measured 6.4% '?' rate (see
+            # _synth_query) so '?' and '=' stop being label leaks.
+            if rng.random() < 0.235:
+                tail += _synth_query(rng)
         urls.append('https://' + host + tail)
     print(f"  Legitimate URLs built: {len(urls)} (structure distribution-matched to phishing class)")
     return urls
@@ -485,6 +535,20 @@ def train_random_forest(X_train, y_train):
 
     print(f"  5-Fold CV Accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
     print(f"  Per-fold: {[f'{s:.4f}' for s in cv_scores]}")
+
+    # Persist it. This was print-only for months, so SOURCE_OF_TRUTH.md had to
+    # carry "not persisted — do not cite a CV number" against a figure that was
+    # in fact measured every run.
+    os.makedirs('models', exist_ok=True)
+    with open('models/cv_results.json', 'w') as f:
+        json.dump({
+            'cv_accuracy_mean': float(cv_scores.mean()),
+            'cv_accuracy_std': float(cv_scores.std()),
+            'cv_accuracy_2std': float(cv_scores.std() * 2),
+            'per_fold': [float(s) for s in cv_scores],
+            'n_splits': 5,
+        }, f, indent=2)
+    print("  Saved to models/cv_results.json")
 
     # Train on full training set
     print("\nTraining final model on full training set...")

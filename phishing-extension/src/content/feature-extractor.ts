@@ -14,6 +14,7 @@
  */
 import type { FeatureVector } from "../types";
 import { parseHost, rawHost, rawPath } from "../ml/tldextract";
+import { TLD_LEGIT_PRIOR, TLD_LEGIT_RATES } from "../ml/tld-rates";
 
 // ---------------------------------------------------------------------------
 // Constants — must match Python lexical_extractor.py exactly
@@ -25,14 +26,13 @@ const BRANDS = [
   "paypal", "netflix", "bankofamerica", "chase", "wellsfargo",
 ];
 
-/** TLD trustworthiness scores — matches Python TLD_SCORES dict */
-const TLD_SCORES: Record<string, number> = {
-  com: 0.95, org: 0.90, net: 0.85,
-  edu: 0.98, gov: 0.99, "co.uk": 0.90,
-  de: 0.92, fr: 0.91, jp: 0.93,
-  tk: 0.10, ml: 0.15, ga: 0.15,
-  cf: 0.15, gq: 0.15,
-};
+/**
+ * TLD legitimacy rates — the SAME generated numbers Python reads from
+ * ml-pipeline/features/tld_rates.json (both emitted by gen_tld_rates.py).
+ * Unknown suffixes fall back to the measured corpus prior rather than a flat
+ * 0.50, which used to penalise legitimate country suffixes (.ng, .com.au) and
+ * flatter hostile ones (.app, .xyz, .top).
+ */
 
 /** Expected character frequencies — matches Python char_probability() */
 const EXPECTED_CHAR_FREQ: Record<string, number> = {
@@ -47,6 +47,25 @@ const SPECIAL_CHARS = new Set("!@#$%^*()[]{}|;:<>".split(""));
 // ---------------------------------------------------------------------------
 // Helper functions — ported 1:1 from Python lexical_extractor.py
 // ---------------------------------------------------------------------------
+
+/**
+ * Legitimacy rate for a registered suffix, walking the suffix hierarchy:
+ * exact match, then successively shorter parents, then the corpus prior.
+ * A suffix never seen in training ("sch.ng") inherits "ng" rather than a
+ * global default. Exact port of tld_legitimate_rate() in lexical_extractor.py.
+ */
+function tldLegitimateRate(suffix: string): number {
+  let s = (suffix || "").toLowerCase();
+  while (s) {
+    const hit = TLD_LEGIT_RATES[s];
+    if (hit !== undefined) return hit;
+    const dot = s.indexOf(".");
+    if (dot === -1) break;
+    s = s.slice(dot + 1);
+  }
+  return TLD_LEGIT_PRIOR;
+}
+
 
 /**
  * Levenshtein distance — exact port of Python levenshtein(a, b).
@@ -264,8 +283,12 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   // [0] URLLength — len(url)
   const URLLength = url.length;
 
-  // [1] DomainLength — len(domain) where domain = SLD.TLD
-  const DomainLength = domain.length;
+  // [1] DomainLength — len(registrable SLD label), NOT len(SLD.TLD).
+  // A compound suffix (.com.ng, .co.uk) mechanically lengthens SLD.TLD, which
+  // let the model read suffix structure as risk and flagged regional sites on
+  // length alone. The SLD label is identical across a site's TLD variants.
+  // Mirrors lexical_extractor.py: len(extracted.domain).
+  const DomainLength = domainSld ? domainSld.length : domain.length;
 
   // [2] IsDomainIP — regex on netloc (strip port first)
   const hostNoPort = hostname.split(":")[0];
@@ -280,7 +303,7 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   const CharContinuationRate = continuationRate(url);
 
   // [5] TLDLegitimateProb — TLD trust score lookup
-  const TLDLegitimateProb = TLD_SCORES[tld.toLowerCase()] ?? 0.50;
+  const TLDLegitimateProb = tldLegitimateRate(tld);
 
   // [6] URLCharProb — expected character frequency score
   const URLCharProb = charProbability(url);
