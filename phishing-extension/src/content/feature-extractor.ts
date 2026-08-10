@@ -254,6 +254,28 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   // Strip 'www.' to prevent dataset bias — matches Python exactly
   url = url.replace("://www.", "://");
 
+  // Strip a lone ROOT trailing slash ('https://x.com/' -> 'https://x.com').
+  //
+  // This is the browser-facing half of the bug: window.location.href always
+  // reports a homepage slash-terminated, but the training corpus has '/' on
+  // 31.4% of legitimate rows and 0.0% of phishing rows, and build_legit_urls()
+  // never emits a bare slash — so '/' had become a label token and every real
+  // homepage landed on the wrong side of it.
+  //
+  // Measured on the shipped model, n=1,500 unknown-legit homepages:
+  //   bare  https://d   ->  12.6% flagged (mean 0.256)
+  //   slash https://d/  ->  39.0% flagged (mean 0.406)
+  // google.com 0.207 -> 0.880, gtbank.com 0.199 -> 0.892; 11 of 12 major
+  // homepages flipped. The same slash on phishing URLs moved recall 91.7% ->
+  // 93.2%, so it carries no phishing signal to lose. A root slash is
+  // semantically identical to no slash (RFC 3986 s6.2.3).
+  //
+  // Only the ROOT slash is stripped — '/path/' keeps its trailing slash.
+  // Mirrors lexical_extractor.py exactly; the parity gate covers it.
+  if (/^https?:\/\/[^/]+\/$/.test(url)) {
+    url = url.slice(0, -1);
+  }
+
   // Parse URL components
   let parsed: URL;
   try {

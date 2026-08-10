@@ -48,6 +48,32 @@ def extract_lexical_features(url: str) -> dict:
     
     # Strip 'www.' subdomain to prevent dataset bias (100% of legit URLs contain www.)
     url = url.replace('://www.', '://')
+
+    # Strip a lone ROOT trailing slash ('https://x.com/' -> 'https://x.com').
+    #
+    # A homepage is the single most common thing a user visits, and the browser
+    # always reports it slash-terminated (window.location.href). The training
+    # corpus contains the opposite: PhiUSIIL legitimate rows are 31.4%
+    # root-slash while phishing rows are 0.0%, and build_legit_urls() emits
+    # 'https://' + host + tail with no bare slash at all. So '/' became a
+    # label token, and every real homepage landed on the wrong side of it.
+    #
+    # Measured on the shipped model, n=1,500 unknown-legit homepages:
+    #   bare  https://d   ->  12.6% flagged (mean 0.256)
+    #   slash https://d/  ->  39.0% flagged (mean 0.406)
+    # one character, +26.4 points of false positives. google.com 0.207 -> 0.880,
+    # gtbank.com 0.199 -> 0.892; 11 of 12 major homepages flipped CLEAN->flagged.
+    #
+    # Safe to normalise away: the same slash added to phishing URLs moved recall
+    # 91.7% -> 93.2%, i.e. it pushes scores up regardless of true class, so it
+    # carries no phishing signal to lose. A root slash is semantically identical
+    # to no slash (RFC 3986 s6.2.3), so this is a correctness fix, not a tuning
+    # knob. Only the ROOT slash is stripped -- '/path/' keeps its trailing slash,
+    # since there the slash is real path structure.
+    #
+    # Mirrored 1:1 in feature-extractor.ts; the parity gate covers it.
+    if re.match(r'^https?://[^/]+/$', url):
+        url = url[:-1]
     
     parsed = urlparse(url)
     extracted = tldextract.extract(url)

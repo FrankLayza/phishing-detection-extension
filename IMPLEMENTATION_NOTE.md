@@ -4,6 +4,79 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
+## August 10, 2026 (later) — One trailing slash was flagging every homepage on the internet
+
+**Found by testing in Chrome**, not by any harness. `gtbank.com` and `paystack.com` showed
+**89%** and **88%** SUSPICIOUS in the popup, while `validate_unknown_legit.py` scored the
+same domains 0.2368 / 0.2256 CLEAN. Three layers disagreed, so the model was not the
+suspect — something between them was.
+
+**Root cause:** a single root trailing slash. The browser reports a homepage as
+`https://gtbank.com/` (`window.location.href` always appends it); every validation script
+builds `'https://' + domain` with no slash. Those are different feature vectors:
+
+| URL | score |
+| --- | --- |
+| `https://gtbank.com` | 0.1994 → CLEAN |
+| `https://gtbank.com/` | **0.8922 → SUSPICIOUS** |
+
+**Why the corpus taught this.** In PhiUSIIL, **31.4% of legitimate rows end in a root slash
+and 0.0% of phishing rows do**, and `build_legit_urls()` (`train.py:383`) emits
+`'https://' + host + tail` — never a bare slash — while `augment_legitimate_urls()`
+(`train.py:85`) actively `rstrip('/')`s. So `/` became a label token pointing the wrong way,
+and the single most common thing a user visits — a homepage — landed on the wrong side of
+it. Exactly the same class of leak as the query-string bug fixed earlier today; that fix
+added `?`, `=` and path digits to the synthesised legit class, but not the bare root slash.
+`train.py:43` names this failure ("flag real homepages like https://google.com/") in a
+docstring — the mechanism was anticipated and then reintroduced downstream.
+
+**Measured before the fix** (shipped model, n=1,500 unknown-legit homepages):
+
+| form | flagged ≥0.50 | mean |
+| --- | --- | --- |
+| `https://d` | 12.6% | 0.256 |
+| `https://d/` | **39.0%** | 0.406 |
+
++26.4 points from one character. 11 of 12 major homepages flipped CLEAN→flagged:
+google.com 0.207→0.880, paypal.com 0.202→0.881, gtbank.com 0.199→0.892,
+flutterwave.com 0.244→0.884.
+
+**Fix — normalise, do not retrain.** Strip a lone *root* trailing slash before feature
+extraction, in [`lexical_extractor.py`](ml-pipeline/features/lexical_extractor.py) and
+[`feature-extractor.ts`](phishing-extension/src/content/feature-extractor.ts) identically.
+`/path/` keeps its trailing slash — there the slash is real structure. A root slash is
+semantically identical to no slash (RFC 3986 §6.2.3), so this is a correctness fix rather
+than a tuning knob, and it needs no retrain.
+
+Verified safe rather than assumed: adding the same slash to 1,500 phishing URLs moved
+recall **91.7% → 93.2%**, i.e. a trailing slash pushes scores up regardless of true class.
+It carries no phishing signal, so normalising it away costs nothing.
+
+**Verified after the fix:**
+* `gtbank.com/` 0.8922 → **0.1994**; `paystack.com/` 0.8821 → **0.1985** — now identical to
+  their bare forms, scored through the real shipped bundle + built model JSON.
+* Slash penalty across 1,500 homepages: +26.4 points → **+0.0 points**.
+* Parity gate **0 mismatches / 20,160 values**; `npx tsc --noEmit` exit 0.
+* `validate_realworld.py` **19/20, phishing 10/10** — unchanged.
+* Phishing set through the shipped path still caught: secure-paypal-login.tk 0.945,
+  g00gle-verify.tk 0.966, paypa1-secure.gq 0.984, netfl1x-account.ga 0.965.
+
+**The reported FPR did not change (sampled 15.4%) and that is the point** —
+`validate_unknown_legit.py` builds URLs without trailing slashes, so it never measured the
+browser's actual input. Every FPR figure recorded before today describes a URL shape the
+extension never sees. The honest statement is that real-world homepage FPR *was* far worse
+than 15.4% and is now consistent with it. **Follow-up: `validate_unknown_legit.py` and
+`simulate_extension.mjs` should emit slash-terminated homepages** so the metric matches
+reality.
+
+**New tool:** [`ml-pipeline/score_shipped.mjs`](ml-pipeline/score_shipped.mjs) — scores a URL
+through the *real* bundled extractor (esbuild, same as the parity gate) plus the *built*
+model JSON. Use it, not `diagnose_url.mjs`, which carries a drifted inlined extractor copy
+(hardcoded TLD table, ASCII-only letter regex) and reported a third, wrong number (0.56)
+for these same URLs.
+
+---
+
 ## August 10, 2026 — The shipped build had no model: restored the asset copy dropped with `web_accessible_resources`
 
 **Context:** merging `fix/query-digit-corpus-leak` into `main` (fast-forward to `0ca9429`)
