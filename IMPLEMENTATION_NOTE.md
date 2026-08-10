@@ -4,6 +4,62 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
+## August 10, 2026 (latest) — The popup showed "Safe — google.com" on a phishing page
+
+**Found in Chrome, and the worst bug of the day.** Testing the curated phishing set, the
+popup reported **Safe · 5% · google.com · Checked by Trusted-sites list** while the address
+bar read `paypa1-security.gq/update/billing` and Chrome's own Safe Browsing interstitial
+filled the page. Same on `faceb00k-security.tk`, `chase-banking-secure.ml`, and
+`secure-paypal-login.tk`.
+
+Nothing was mis-scored. The extension was rendering a **stale verdict from a previous page**.
+
+**Root cause:** the verdict is stored as `result_<tabId>` (`background/index.ts:154`) and was
+only removed when the tab **closed** (`onRemoved`, line 177). Navigating an existing tab
+left the old entry in place, and `popup.tsx` read it by tab ID and rendered it without ever
+comparing it to the current tab's URL. So the verdict outlived the page it described.
+
+That is why the popup showed `google.com`: that tab had previously been on google.com.
+
+**Severity.** This inverts the product's purpose. A missed detection leaves the user no
+worse off than with no extension installed; this *actively reassured* the user on a page
+Chrome had already flagged as dangerous, complete with a green shield and a "Trusted-sites
+list" provenance chip. It also silently invalidates any earlier manual testing done by
+clicking through tabs — including the "9/9 CLEAN" style spot-checks recorded in earlier
+entries, which could not distinguish a fresh verdict from a stale one.
+
+**Fix, in two layers:**
+1. [`popup.tsx`](phishing-extension/src/popup.tsx) — treat a verdict as valid only when
+   `res.url === tabs[0].url`. Anything else falls through to the existing "Nothing scanned
+   yet" empty state, which offers a **Scan this page** button.
+2. [`background/index.ts`](phishing-extension/src/background/index.ts) — a
+   `chrome.tabs.onUpdated` listener removes `result_<tabId>` and clears the badge as soon as
+   `changeInfo.url` changes, so stale state does not survive the navigation that
+   invalidated it. Guarding on `changeInfo.url` means a same-page anchor jump does not
+   discard a valid verdict.
+
+Layer 1 alone would have been enough to stop the false reassurance, but the stale entry
+would still sit in storage and keep the previous page's ✓/! badge on the icon.
+
+**Expected behaviour now on those pages:** "Nothing scanned yet", **not** a phishing verdict.
+Chrome's interstitial and DNS-error pages (`DNS_PROBE_FINISHED_NXDOMAIN`) are browser-owned;
+content scripts cannot run there, so PhishGuard never sees the URL and correctly reports
+nothing rather than guessing. The dead `.tk`/`.ga`/`.gq` test domains mostly resolve to one
+of those two pages, which is why the curated set cannot be validated by browsing alone —
+score it with `ml-pipeline/score_shipped.mjs` instead, where all 10/10 are flagged
+(6 ≥0.90 red, 4 in the 0.50–0.89 amber band).
+
+**Verified:** `npx tsc --noEmit` exit 0; `pnpm build` succeeds; the built `popup.*.js`
+contains the URL comparison (`.url!==a`) and the built worker contains `onUpdated` and
+`setBadgeText({text:""`.
+
+**Lesson, consistent with the rest of today:** every offline harness scores a URL string and
+would never have caught this — the defect lives entirely in the extension's UI state
+handling, which nothing tests. Four bugs found today, all in the gap between "the model is
+correct" and "the product is correct".
+
+---
+
 ## August 10, 2026 (later) — One trailing slash was flagging every homepage on the internet
 
 **Found by testing in Chrome**, not by any harness. `gtbank.com` and `paystack.com` showed

@@ -177,3 +177,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(`result_${tabId}`);
 });
+
+// Discard the stored verdict the moment a tab navigates away.
+//
+// The entry is keyed by tab ID alone, so without this it outlives the page it
+// describes: navigating google.com -> paypa1-security.gq in the same tab left
+// the old CLEAN verdict in place, and the popup rendered "Safe - google.com"
+// over a phishing URL. The popup now also compares result.url to the live tab
+// URL, but that is the second line of defence -- stale state should not survive
+// the navigation that invalidated it.
+//
+// Fires on committed navigation only (url changes on the loading tab), so a
+// same-page anchor jump does not needlessly discard a valid verdict.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) {
+    chrome.storage.local.remove(`result_${tabId}`);
+    // Drop the badge too, or the previous page's ✓/! stays on the icon while
+    // the new page is unscanned.
+    chrome.action.setBadgeText({ text: "", tabId });
+  }
+});

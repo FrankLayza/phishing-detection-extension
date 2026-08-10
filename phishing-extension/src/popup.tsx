@@ -407,10 +407,23 @@ export default function Popup() {
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabId = tabs[0]?.id
+      const tabUrl = tabs[0]?.url
       if (!tabId) { setLoading(false); return }
       chrome.storage.local.get(`result_${tabId}`, (data) => {
         const res = data[`result_${tabId}`] as DetectionResult | undefined
-        if (res) {
+        // The verdict is keyed by tab ID and only cleared when the tab CLOSES,
+        // so after navigating the same tab the stored entry still describes the
+        // PREVIOUS page. Rendering it unchecked showed "Safe — google.com" while
+        // the address bar read paypa1-security.gq: the worst possible failure,
+        // since it actively reassures the user on a phishing page. A verdict is
+        // only valid for the exact URL it was computed from.
+        //
+        // Pages the content script cannot run on (chrome://, the Safe Browsing
+        // interstitial, DNS error pages) never produce a verdict, so this
+        // correctly falls through to the "Nothing scanned yet" empty state
+        // rather than showing a stale one.
+        const isStale = !res || !tabUrl || res.url !== tabUrl
+        if (res && !isStale) {
           setResult(res)
           const target = res.prediction.score * 100
           const start  = performance.now()
