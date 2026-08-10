@@ -4,6 +4,76 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
+## August 10, 2026 — The shipped build had no model: restored the asset copy dropped with `web_accessible_resources`
+
+**Context:** merging `fix/query-digit-corpus-leak` into `main` (fast-forward to `0ca9429`)
+to test the recalibrated red band in Chrome. The merge itself was clean. Verifying the
+build before loading it unpacked is what surfaced this.
+
+**The bug:** `build/chrome-mv3-prod/` contained no `assets/` directory, while the service
+worker fetches three files from exactly that path at runtime:
+
+| Call site | Asset |
+| --- | --- |
+| [`src/ml/rf-inference.ts:48`](phishing-extension/src/ml/rf-inference.ts) | `phishing_model.json` |
+| [`src/ml/shap-approximator.ts:8`](phishing-extension/src/ml/shap-approximator.ts) | `shap_mapping.json` |
+| [`src/background/index.ts:21`](phishing-extension/src/background/index.ts) | `top_domains.json` |
+
+**Cause:** commit `357f33e` (Aug 7, "tighten extension permissions") removed
+`web_accessible_resources: ["assets/*"]` from `package.json`. The security reasoning was
+correct and stands — that entry exposed the whole ~20 MB model to every page visited,
+which hands an attacker the exact decision boundary for offline evasion tuning. But the
+entry was doing double duty: it was also the only thing making Plasmo copy `assets/` into
+the build. Removing it dropped the files from the packaged extension entirely.
+
+**Runtime symptom (why it looked like it worked):** the failure is near-silent. The
+`Promise.all` at `background/index.ts:49` only `.catch(console.error)`s, and
+`initAllowlist()` catches its own failure and falls back to an empty `Set` — so
+`isAllowlisted()` returns false for *every* domain, every page falls through to the ML
+tier, and `MLRunner.predict()` then throws on the missing model. Errors appear only in the
+service-worker console, which nothing in the test loop reads.
+
+**Why no gate caught it:** every validation path reads the *source* `assets/` from disk,
+never the build — `simulate_extension.mjs:166-168` and `diagnose_url.mjs:138` both
+`readFileSync`. The "`pnpm build` succeeds" line recorded in three prior entries is true
+and yet says nothing about whether the extension *runs*. Same class as the stale
+`__parity_bundle.mjs`: a check that passes on an artifact that isn't what ships.
+Note `diagnose_url.mjs:159` already expected `build/chrome-mv3-prod/assets/phishing_model.json`
+— that comparison had been silently printing nothing since Aug 7.
+
+**Fix:** [`phishing-extension/scripts/copy-assets.mjs`](phishing-extension/scripts/copy-assets.mjs),
+wired as a `postbuild` script (plus a `copy:assets` alias for running it alone). It copies
+only the three assets actually fetched — `category_importance.json` and `assets/fonts/`
+are unreferenced in `src/` and stay out of the bundle. It exits non-zero on a missing
+source asset or a missing build dir, so this cannot regress into a silent no-op again.
+
+`web_accessible_resources` was deliberately **not** restored:
+`chrome.runtime.getURL()` + `fetch()` from a service worker does not require it — that gate
+governs access from *page* and *content-script* context only. All three loads are
+worker-side (`background/index.ts:1-2` is the sole importer of both ML modules), so copying
+alone is sufficient and the model stays unreachable from any visited page. Verified: the
+built `manifest.json` has no `web_accessible_resources` key.
+
+**Verified after the fix:**
+* `pnpm build` → `assets/` present in output; all three files SHA-256 identical to source.
+* Model loads and parses from the shipped path: 100 trees, 21 features, classes `[0, 1]`.
+* `diagnose_url.mjs` now scores both copies and they agree exactly —
+  `assets/` 0.2086 / `build/` 0.2086 on `takealot.com/search?q=account&page=2`
+  (allowlist HIT, so ML is short-circuited in the real flow anyway).
+* `validate_realworld.py` → 19/20, phishing 10/10 — unchanged.
+* `simulate_extension.mjs` run against the **shipped build model** → 28/36 overall,
+  unknown-legit 8/12. That reproduces the known documented weak spot, not new breakage.
+* `npx tsc --noEmit` → exit 0. Parity gate → **0 mismatches / 20,160 values** (960 URLs).
+
+**A pnpm-10 gotcha worth keeping:** `pnpm config get enable-pre-post-scripts` returns
+`undefined` here, and pnpm ≥7 documents that default as false — which would make
+`postbuild` a silent no-op, the exact failure being fixed. Tested empirically instead of
+trusting the doc: pnpm 10.30.3 **does** run pre/post hooks for directly-invoked scripts.
+Confirmed by the hook firing in the build output above. Do not "fix" this by inlining the
+copy into `build` on the assumption the hook is dead.
+
+---
+
 ## August 9, 2026 (later) — Found the real FPR cause: the legit class had no query strings
 
 **Why:** two principled fixes in a row (path brand-similarity, then the TLD table) had

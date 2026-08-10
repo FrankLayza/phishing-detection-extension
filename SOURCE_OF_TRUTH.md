@@ -280,8 +280,15 @@ python ml-pipeline/benchmark_inference.py                            # latency b
 python ml-pipeline/validate_realworld.py                             # spot-check on 20 curated URLs
 python ml-pipeline/gen_shap_table.py                                 # → models/shap_values.json (SHAP + directions)
 python ml-pipeline/generate_shap_plots.py                            # → models/shap_*.png (figures only)
-cd phishing-extension && pnpm build                                  # → build/chrome-mv3-prod
+cd phishing-extension && pnpm build                                  # → build/chrome-mv3-prod (+ postbuild copies assets/)
 ```
+
+> **Re-export the model, then always rebuild the extension.** `export_model_json.py`
+> writes to `phishing-extension/assets/`, but the service worker loads from
+> `build/chrome-mv3-prod/assets/` — a `postbuild` hook (`scripts/copy-assets.mjs`) copies
+> the three fetched assets across. Editing `assets/` without rebuilding leaves Chrome
+> running the previous model. This copy is NOT `web_accessible_resources` — that was
+> removed on purpose in `357f33e` so pages cannot read the model.
 
 > `gen_shap_table.py` is the citable artifact (writes JSON); `generate_shap_plots.py`
 > only produces PNGs and prints to stdout. Both re-extract features from the full

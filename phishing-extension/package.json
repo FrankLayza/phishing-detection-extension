@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
+    "postbuild": "node scripts/copy-assets.mjs",
+    "copy:assets": "node scripts/copy-assets.mjs",
     "package": "plasmo package"
   },
   "dependencies": {
