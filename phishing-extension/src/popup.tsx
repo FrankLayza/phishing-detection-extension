@@ -266,6 +266,8 @@ const FEATURE_LABELS: Record<string, { name: string; tag: string }> = {
   SpacialCharRatioInURL:      { name: "Unusual special character ratio",      tag: "Structure" },
   IsHTTPS:                    { name: "Site does not use HTTPS",              tag: "Security" },
   Reputation:                 { name: "Listed as a trusted site",             tag: "Allowlist" },
+  PlatformHosting:            { name: "Hosted on a development platform",      tag: "Hosting" },
+  BrandImpersonation:         { name: "Subdomain impersonates a known brand",  tag: "Spoofing" },
 }
 
 function labelFor(raw: string): { name: string; tag: string } {
@@ -503,7 +505,10 @@ export default function Popup() {
   const isReputation = result.prediction.source === "OVERRIDE"
   const mlSignals  = (result.explanations ?? []).filter(e => e.category !== "Reputation")
   const repSignals = (result.explanations ?? []).filter(e => e.category === "Reputation")
-  const maxImp     = Math.max(0.0001, ...(isReputation ? repSignals : mlSignals).map(s => s.importance || 0))
+  // Platform-hosted URLs carry a Reputation-category signal on an ML result (the
+  // TLD-trust neutralisation explanation). Show it alongside the ML signals.
+  const signals = isReputation ? repSignals : [...mlSignals, ...repSignals]
+  const maxImp     = Math.max(0.0001, ...signals.map(s => s.importance || 0))
 
   let host = result.url
   try { host = new URL(result.url).hostname.replace(/^www\./, "") } catch {}
@@ -516,8 +521,6 @@ export default function Popup() {
 
   const sourceLabel = isReputation ? "Trusted-sites list" : "On-device model"
   const SourceIcon  = isReputation ? Icons.list("#7a7a7a", 13) : Icons.cpu("#7a7a7a", 13)
-
-  const signals = isReputation ? repSignals : mlSignals
 
   return (
     <div className="pg">

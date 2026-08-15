@@ -1,52 +1,14 @@
 import { MLRunner } from "../ml/rf-inference";
 import { ShapApproximator } from "../ml/shap-approximator";
+import { reputation } from "../ml/reputation";
 import { urlCache } from "../utils/cache";
-import type { FeatureVector, DetectionResult } from "../types";
+import type { DetectionResult } from "../types";
 
 const mlRunner = new MLRunner();
 const shapApproximator = new ShapApproximator();
 
-// ---------------------------------------------------------------------------
-// Reputation allowlist (top-sites). URL-only ML cannot distinguish a popular
-// legitimate bare domain (google.com) from phishing on a reputable TLD, because
-// the signal isn't in the URL string. We therefore short-circuit known-popular
-// registrable domains to CLEAN and let the ML model handle unknown domains and
-// typosquats. The list is bundled on-device, so this stays privacy-preserving.
-// ---------------------------------------------------------------------------
-let allowlist: Set<string> | null = null;
-
-async function initAllowlist() {
-  if (allowlist) return;
-  try {
-    const resp = await fetch(chrome.runtime.getURL("assets/top_domains.json"));
-    allowlist = new Set<string>(await resp.json());
-    console.log(`PhishGuard: Reputation allowlist loaded (${allowlist.size} domains)`);
-  } catch (e) {
-    console.error("PhishGuard: failed to load allowlist", e);
-    allowlist = new Set();
-  }
-}
-
-/** True if the URL's registrable domain (eTLD+1) is a known-popular site. */
-function isAllowlisted(url: string): boolean {
-  if (!allowlist || allowlist.size === 0) return false;
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return false;
-  }
-  const labels = host.split(".");
-  // Test the last 2 and last 3 labels against the PSL-derived allowlist
-  // (covers bbc.co.uk via "bbc.co.uk", google.com via "google.com").
-  for (let take = 2; take <= 3 && take <= labels.length; take++) {
-    if (allowlist.has(labels.slice(-take).join("."))) return true;
-  }
-  return false;
-}
-
-// Initialize models + allowlist
-Promise.all([mlRunner.init(), shapApproximator.init(), initAllowlist()]).catch(console.error);
+// Initialize models + reputation adapters
+Promise.all([mlRunner.init(), shapApproximator.init(), reputation.init()]).catch(console.error);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Only trust messages from this extension's own content scripts, popup, or
@@ -69,20 +31,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const startTime = Date.now();
 
-        // 2. Reputation fast-path: known-popular domain → CLEAN (skip ML)
-        await initAllowlist();
-        if (isAllowlisted(url)) {
+        // 2. Reputation check — hard allowlist first, advisory platform correction
+        //    feeds the model below. See src/ml/reputation.ts for the seam.
+        const rep = await reputation.evaluate(url, features);
+
+        if (rep.kind === "allowlisted") {
           const repResult: DetectionResult = {
             url,
             timestamp: Date.now(),
             prediction: { isPhishing: false, score: 0.05, source: 'OVERRIDE' },
-            explanations: [{
-              feature: "Reputation",
-              value: 1,
-              importance: 1,
-              description: "Recognized as a well-known, popular website (reputation allowlist)",
-              category: "Reputation",
-            }],
+            explanations: rep.signals,
             processingTimeMs: Date.now() - startTime,
           };
           urlCache.set(url, repResult);
@@ -96,10 +54,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        // 3. Run ML Model (unknown domain)
+        // 3. Run ML Model (unknown domain). The model always sees the raw
+        //    features first. For platform-hosted URLs whose raw score is below
+        //    the PHISHING cut (0.90, the calibrated hard-red line) the advisory
+        //    reputation adapter neutralises TLDLegitimateProb and we re-score —
+        //    so a borderline page that is clean on every other signal drops to
+        //    CLEAN. A HARD verdict (>= 0.90 on the raw vector) is immune to the
+        //    correction: platform membership may soften a borderline, never a
+        //    red alarm. See src/ml/reputation.ts for the seam.
+        //
+        //    The correction is ALSO withheld when the subdomain impersonates a
+        //    brand (rep.impersonation set): the neutralisation would remove the
+        //    clone's only phishing signal (the low-trust TLD). See the guard in
+        //    reputation.ts.
         let mlPrediction = await mlRunner.predict(features);
+        const correctionApplied =
+          rep.kind === "platform" &&
+          !rep.impersonation &&
+          mlPrediction.score < 0.9;
+        const usedFeatures = correctionApplied ? rep.features : features;
+        if (correctionApplied) {
+          mlPrediction = await mlRunner.predict(rep.features);
+        }
         
-        // 3. Google Safe Browsing API Fallback for borderline cases
+        // 3b. Google Safe Browsing API Fallback for borderline cases
         const storage = await chrome.storage.local.get(["riskThreshold", "useGsbFallback", "gsbKey"]);
         const threshold = storage.riskThreshold || 0.5;
         const useGsb = storage.useGsbFallback !== false;
@@ -131,8 +109,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         
-        // 4. Generate Explanations
-        const explanations = await shapApproximator.getExplanations(features);
+        // 4. Generate Explanations. Only when the platform correction actually ran
+        //    does the popup get the "TLD trust neutralised" signal; a hard
+        //    verdict that was immune to the correction shows plain ML signals.
+        //    A withheld brand-impersonation correction is the one exception:
+        //    the guard's signal must show because it is WHY the page kept its
+        //    full risk score.
+        const shapExplanations = await shapApproximator.getExplanations(usedFeatures);
+        const explanations = correctionApplied || rep.impersonation
+          ? [...rep.signals, ...shapExplanations]
+          : shapExplanations;
         
         const result: DetectionResult = {
           url,

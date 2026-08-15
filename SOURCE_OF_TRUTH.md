@@ -62,6 +62,19 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 > (±0.33%, 2σ) is artifact-backed. The old "93.85% (±0.11%)" remains superseded — it
 > was a pre-corpus-fix stdout figure.
 >
+> **⚠ The committed model does NOT byte-reproduce from current code (Aug 14, 2026).**
+> Re-running `train.py` on the current extractor yields a *different* forest
+> (846,454 nodes vs the committed 806,620; Accuracy 90.65% / FPR 6.64% vs the
+> documented 91.58% / 5.87%). Cause: commit `38e820d` (root-slash strip) landed
+> AFTER the model at `0ca9429` was trained and chose "normalisation, not a retrain".
+> The strip is **not** a training no-op — 31,744 of 100,945 phishing rows (31.4%)
+> end in a bare root slash (the `38e820d` commit message claims "0.0%", which the
+> dataset disproves), so the current extractor feeds the model different phish
+> features than it was trained on. **The committed `assets/phishing_model.json` is
+> authoritative and must not be silently replaced by a retrain.** Any deliberate
+> retrain must be a reviewed decision (it changes FPR by ~0.8pt) and re-exported
+> via `export_model_json.py` explicitly.
+>
 > Training is fully seeded (`random_state=42` on the split, SMOTE and the forest).
 > Verified by re-running: identical metrics, identical forest (691,570 nodes, matching
 > thresholds) and a **byte-identical** `phishing_model.json`. Only `random_forest.pkl`
@@ -320,3 +333,15 @@ cd phishing-extension && pnpm build                                  # → build
 - **`cross_validate_ts.mjs` prints stale text:** hardcodes "All 44 scaled values match"
   (model has 21) and still frames itself as diagnosing the scaler bug fixed in 0537be5,
   printing "SCALER BUG IDENTIFIED" and "fix the scaler formula and ship it" on success.
+- **Brand-in-subdomain impersonation (fixed Aug 14, 2026 via reputation, not the model).**
+  Platform-hosted phish clones (`microsoft-verify-login.netlify.app`, `secure-paypal-verify.vercel.app`)
+  were being cleared by the advisory platform correction (TLD neutralisation) dropping them to CLEAN.
+  An experiment that taught the extractor to score brand tokens in compound subdomains failed
+  (URLSimilarityIndex collapsed to 0.0037 importance, FPR 6.54%): legit CDN rows
+  (`apple-relay.cloudflare.com`) legitimately carry brand tokens, so the signal is not separable
+  lexically. Fixed instead in `reputation.ts` (adapter C): a platform correction never downgrades
+  a page whose subdomain carries a brand token (`brandTokenInSubdomain`), with the caveat that a
+  subdomain that IS exactly one brand label (`microsoft.github.io`) is a legitimate org page and
+  still gets the normal correction. Model untouched. Residual gaps: `instagram` not in the brand
+  list, and non-platform brand squats (`microsoft-verify-login.example.com`) are still CLEAN —
+  both need corpus-level work, not reputation.
