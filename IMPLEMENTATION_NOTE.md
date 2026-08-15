@@ -4,7 +4,83 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 10, 2026 (latest) — The popup showed "Safe — google.com" on a phishing page
+## August 15, 2026 (latest) — Committed the brand-impersonation guard, reviewed it, and found 7 defects
+
+**What landed.** The reputation refactor + brand-impersonation guard (authored in the
+Aug 14 session, previously uncommitted) is now committed as `eb3e2b3`, with
+`.gitignore` hygiene split into `7f77ebc`. Contents: new `src/ml/reputation.ts` (the
+three-adapter seam), new `src/ml/brands.ts` (shared brand/typo vocabulary +
+`brandTokenInSubdomain`), the guard that withholds the advisory platform correction
+when a subdomain carries a brand token, a `popup.tsx` fix that was silently dropping
+Reputation-category signals on ML-sourced results, plus `demo_supervisor.mjs`,
+`SUPERVISOR_DEMO.md`, and the `CONTEXT.md` / `SOURCE_OF_TRUTH.md` documentation.
+
+**Verification (all green).** `tsc --noEmit` clean. Parity gate **0 mismatches across
+20,160 values** after rebuilding the bundle — the meaningful result, since moving
+`levenshtein` / `typoSimilarity` / `HOMOGLYPHS` / `BRANDS` into `brands.ts` had to be
+behaviour-preserving. `assets/phishing_model.json` md5-identical to the copy in
+`build/chrome-mv3-prod/assets/`. All 11 URLs in `SUPERVISOR_DEMO.md` reproduce their
+documented scores exactly.
+
+**Seven defects found, none fixed.** Full detail, repro commands and candidate fixes
+are in [`handoff.md`](handoff.md) §3. Summary:
+
+1. **CRITICAL — the hard allowlist runs before the guard and matches platform
+   domains.** `psl-trie.ts` is ICANN-only, so `foo.vercel.app` resolves to
+   registrable domain `vercel.app` — the platform, not the tenant. Adapter A is
+   consulted with that, and `railway.app`, `neocities.org`, `sharepoint.com`,
+   `forms.gle`, `wix.com`, `windows.net`, `typeform.com`, `jotform.com`,
+   `firebaseio.com`, `ondigitalocean.app`, `vercel.com`, `netlify.com` are all in
+   `top_domains.json`. `microsoft-verify-login.railway.app` → **CLEAN 0.05**,
+   bypassing adapter C, the model and the guard entirely. Any subdomain of any
+   allowlisted domain is hard-cleared.
+2. **HIGH — the single-label exemption is free to claim on 16 of 18 platforms.**
+   Justified by `microsoft.github.io` (org-owned namespace) but applied to every
+   platform: `paypal.vercel.app` → CLEAN 0.232, `microsoft.netlify.app` → CLEAN
+   0.291, `apple.surge.sh` → CLEAN 0.142. *Worse* than pre-guard, since these now
+   receive the TLD correction.
+3. **MEDIUM — threshold boundary inconsistent and reachable.**
+   `brandTokenInSubdomain` uses `sim > 0.6`; `brandSimilarityOf` and Python use
+   `< 0.6 → 0`. `paple`/`aplpe` (transpositions of `apple`) score exactly 0.6000, so
+   `paple-login.vercel.app` → CLEAN 0.253 while `payapl-login.vercel.app` (0.667) is
+   correctly guarded. One character: `>=`.
+4. **LOW —** `feature-extractor.ts:79` still declares a local `TYPO_THRESHOLD = 0.6`
+   that shadows the import on line 18, so the duplicate literal survives at exactly
+   the spot `brands.ts` was created to eliminate.
+5. **LOW —** `brandSimilarityOf` is exported and imported by nothing.
+6. **COSMETIC —** `demo_supervisor.mjs` prints `raw ML : undefined` for allowlisted
+   URLs.
+7. **DOCS —** `feature-extractor.ts:176-177` and `lexical_extractor.py:56-57` state
+   the root-slash classes **backwards** (see below).
+
+Findings 1–3 were reported rather than patched because they change verdicts, which
+this project treats as a reviewed decision. Note they currently *suppress* false
+positives, so fixing them will move unknown-legit FPR up; that trade needs recording
+in `SOURCE_OF_TRUTH.md`.
+
+**Corrected a load-bearing factual inversion.** Measured directly on
+`datasets/phiusiil.csv`: root-slash rate is **0.00%** for legitimate rows
+(`label == 1`, n=134,850) and **31.45%** for phishing rows (`label == 0`, n=100,945;
+31,744 rows). Label convention confirmed via `gen_tld_rates.py:130`, which builds its
+legit domain list from `label == 1`, and by inspection. The two extractor comments
+assert the opposite, and under their premise the Aug 10 bug is impossible — a
+legit-leaning token cannot push homepages *toward* phishing, yet `google.com` went
+0.207 → 0.880 when the slash was added. The correct account: **the root slash is a
+phishing-class token and the browser puts one on every homepage.** The figure added
+to `SOURCE_OF_TRUTH.md` §3 in the Aug 14 session is the right one; the code comments
+need swapping (docs-only, parity unaffected).
+
+**New cross-session documentation.** Added three root-level docs so future work has a
+defined pickup point: [`architecture.md`](architecture.md) (components, data flow,
+seams, the seven invariants), [`handoff.md`](handoff.md) (current state, the findings
+queue with repro commands, environment gotchas), and [`memory.md`](memory.md) (the
+accumulated traps — chiefly that every validation surface here has been green while
+the product was broken at least once). These supersede the state section of
+`WORK_SESSION.md`, which is stale as of Aug 5.
+
+---
+
+## August 10, 2026 — The popup showed "Safe — google.com" on a phishing page
 
 **Found in Chrome, and the worst bug of the day.** Testing the curated phishing set, the
 popup reported **Safe · 5% · google.com · Checked by Trusted-sites list** while the address
