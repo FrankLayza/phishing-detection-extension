@@ -24,6 +24,7 @@ from imblearn.over_sampling import SMOTE
 import joblib
 import json
 import time
+import tldextract
 
 # Add ml-pipeline/ to sys.path so 'features' package can be found
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -178,6 +179,75 @@ TOP_SITES_PATH = 'datasets/top-1m.csv'
 N_TOP_SITES = 55000
 N_PHIUSIIL_LEGIT = 55000
 
+# ---------------------------------------------------------------------------
+# LOW-TRUST SUFFIX ENRICHMENT (experiment, Aug 15, 2026)
+# ---------------------------------------------------------------------------
+# Diagnosed by ml-pipeline/diagnose_fpr.py: of the unknown-legitimate sites the
+# shipped model flags, the dominant distinguishing feature is TLDLegitimateProb
+# (+1.59 sd vs the training legit class; the next feature is +0.62 sd, and
+# DomainLength -- long blamed for this in the docs -- is -0.03 sd, i.e. not
+# involved at all).
+#
+# Flagged legit sites average 0.596 suffix trust against the training legit
+# class's 0.779. That is NOT an aggregate distribution mismatch: mean suffix
+# trust is ~0.785 across the ENTIRE top-1m at every rank depth, so the legit
+# class is already representative on average. The gap is in the TAIL -- real
+# legitimate sites do exist on .app (0.095), .co (0.182), .site (0.140),
+# .xyz (0.292), and the legit class carries almost none of them (0.9% below
+# 0.35 trust), so the model can use the suffix as a shortcut instead of learning
+# to discriminate WITHIN a hostile suffix.
+#
+# This substitutes part of the top-sites draw with real legit domains on
+# low-trust suffixes. It is deliberately NOT distribution-matching to the
+# phishing class -- that would neutralise a feature whose signal is real
+# (.app genuinely carries 6,368 phishing rows against 200 legit) and would cost
+# recall. It is hard-example oversampling: force within-suffix discrimination.
+#
+# The legit class SIZE is unchanged (substitution, not addition) so class
+# balance -- and therefore whether SMOTE runs -- is not a confound.
+#
+# ---------------------------------------------------------------------------
+# MEASURED AND REJECTED (Aug 15, 2026). Kept OFF and documented rather than
+# deleted, so the result is reproducible by flipping one constant.
+#
+# Both arms retrained on identical code and scored on the same unknown-legit
+# band (Cisco rank >= 500,000, so the enrichment band 55k-500k is disjoint):
+#
+#   metric                     enrichment OFF   enrichment 10,000
+#   sampled ML FPR (n=4,000)          16.3%            15.7%
+#   sampled pipeline FPR              11.5%            11.1%
+#   sampled hard red alarms            1.2%             0.5%   <-- the one real win
+#   phishing recall                  87.66%           86.86%
+#   held-out accuracy                90.64%           89.84%
+#   in-corpus FPR                     6.62%            7.44%
+#   5-fold CV                        0.9038           0.8957
+#   forest nodes                    864,614          935,950
+#
+# 0.6 points of unknown-legit FPR, bought with 0.8 points of recall, 0.9 of
+# precision, 0.8 of held-out accuracy, 0.8 of in-corpus FPR and 8% more model.
+# Decisive: at 15.7% the enriched model is still WORSE than the committed model
+# already shipping (14.9% on the same band), so adopting it would regress the
+# headline metric while forcing a full re-qualification.
+#
+# Genuine finding worth keeping: hard red alarms more than halved (1.2% -> 0.5%,
+# and 0.7% -> 0.0% on the curated set). The enrichment does reduce the model's
+# CONFIDENCE on low-trust-suffix legit sites, moving them out of the blocking red
+# band into amber. If hard-red rate ever becomes the primary objective rather
+# than flagged-rate, revisit this -- it is the only lever measured so far that
+# moves it.
+#
+# Set N_LOW_TRUST_LEGIT = 0 to reproduce the pre-experiment baseline (the default).
+N_LOW_TRUST_LEGIT = 0
+LOW_TRUST_MAX = 0.50          # a suffix counts as low-trust below this legit rate
+# Enrichment draws from this rank band. Its upper bound MUST stay below the
+# unknown-legit validation floor or the acceptance metric is contaminated;
+# validate_unknown_legit.py imports TRAIN_RANK_MAX and asserts exactly that.
+LOW_TRUST_RANK_MIN = 55000
+# The deepest Cisco rank the training corpus touches. With enrichment off the
+# corpus stops at N_TOP_SITES, which is what lets the validation floor return to
+# its historical 120,000 and keeps every published FPR figure comparable.
+TRAIN_RANK_MAX = 500000 if N_LOW_TRUST_LEGIT > 0 else N_TOP_SITES
+
 
 def measure_structure(phish_urls):
     """
@@ -313,6 +383,50 @@ def _synth_sub_label(rng, target_len):
     return lab or 'www'
 
 
+def _low_trust_legit_domains(top, n, rng):
+    """
+    Real legitimate domains sitting on low-trust suffixes (.app, .co, .site, .xyz…).
+
+    Drawn from the Cisco list between LOW_TRUST_RANK_MIN and TRAIN_RANK_MAX, so they
+    are (a) real sites, never fabricated, and (b) disjoint from the sampled
+    unknown-legit validation band. Suffix trust is read from the same generated table
+    the feature itself uses, so "low trust" here means exactly what
+    TLDLegitimateProb means.
+
+    CURATED_BARE is excluded explicitly. The rank band alone does not protect the
+    curated population -- it is hand-listed, not rank-bounded -- and the first run of
+    this sampler pulled in `jumia.com.ng`, a curated validation domain, which would
+    have contaminated 4 of its 144 URLs.
+
+    Returns fewer than n if the band cannot supply that many; the caller prints the
+    actual count rather than silently padding with high-trust domains.
+    """
+    from features.validation_sets import CURATED_BARE
+
+    rates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'features', 'tld_rates.json')
+    with open(rates_path) as fh:
+        blob = json.load(fh)
+    rates = blob.get('rates', blob)
+    prior = blob.get('prior', 0.5) if isinstance(blob, dict) else 0.5
+    held_out = {d.lower() for d in CURATED_BARE}
+
+    band = top[(top['rank'] >= LOW_TRUST_RANK_MIN) & (top['rank'] < TRAIN_RANK_MAX)]
+    candidates = []
+    for host in band['domain'].dropna().astype(str):
+        if host.lower() in held_out:
+            continue
+        suffix = tldextract.extract(host).suffix
+        if suffix and rates.get(suffix, prior) < LOW_TRUST_MAX:
+            candidates.append(host)
+    if not candidates:
+        return []
+    if len(candidates) > n:
+        idx = rng.choice(len(candidates), size=n, replace=False)
+        candidates = [candidates[i] for i in idx]
+    return candidates
+
+
 def build_legit_urls(phish_urls, random_state=42):
     """
     Build the legitimate class from both real populations, synthesizing URL
@@ -326,7 +440,17 @@ def build_legit_urls(phish_urls, random_state=42):
     sub_counts, sub_lens = dist['sub_counts'], dist['sub_lens']
 
     top = pd.read_csv(TOP_SITES_PATH, header=None, names=['rank', 'domain'])
-    top_domains = top['domain'].dropna().astype(str).head(N_TOP_SITES).tolist()
+    n_top = N_TOP_SITES - N_LOW_TRUST_LEGIT
+    top_domains = top['domain'].dropna().astype(str).head(n_top).tolist()
+
+    # Low-trust suffix enrichment — see the note at N_LOW_TRUST_LEGIT.
+    if N_LOW_TRUST_LEGIT > 0:
+        low_trust = _low_trust_legit_domains(top, N_LOW_TRUST_LEGIT, rng)
+        top_domains += low_trust
+        print(f"  Low-trust enrichment: {len(low_trust)} real legit domains on "
+              f"suffixes below {LOW_TRUST_MAX} trust (ranks "
+              f"{LOW_TRUST_RANK_MIN}-{TRAIN_RANK_MAX}), substituted for "
+              f"{N_LOW_TRUST_LEGIT} top-sites entries")
 
     phi_all = pd.read_csv('datasets/phiusiil.csv').dropna(subset=['URL'])
     phi_legit = phi_all[phi_all['label'] == 1]['URL'].astype(str).tolist()

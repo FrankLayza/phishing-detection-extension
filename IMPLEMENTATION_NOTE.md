@@ -4,7 +4,140 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 15, 2026 (latest) — The FPR harness now measures the model that ships
+## August 15, 2026 (latest) — The FPR diagnosis was wrong; the corpus fix was measured and rejected
+
+Ran the corpus experiment on the unknown-legitimate FPR. The intervention was rejected,
+but the diagnostic work overturned a claim this project had been building on for days.
+
+### The standing diagnosis was false
+
+`SOURCE_OF_TRUTH.md`, `memory.md` and `SUPERVISOR_DEMO.md` all named `DomainLength` as
+the false-positive driver, on the argument that compound suffixes (`com.ng`) are
+mechanically longer than `.com` so the feature reads suffix structure as risk.
+
+New tool [`ml-pipeline/diagnose_fpr.py`](ml-pipeline/diagnose_fpr.py) measures each
+feature against the population that actually fails — the 1,714 unknown-legit URLs
+reaching the ML tier, 23.5% of which are flagged — in training-legit standard
+deviations, signed so positive always means "looks more phishing-like":
+
+| feature | train legit | train phish | flagged legit | gap |
+|---|---|---|---|---|
+| **TLDLegitimateProb** | 0.779 | 0.552 | 0.598 | **+1.59 sd** |
+| NoOfSubDomain | 1.162 | 0.710 | 0.336 | +0.62 sd |
+| SpacialCharRatioInURL | 0.030 | 0.033 | 0.035 | +0.37 sd |
+| DegitRatioInURL | 0.023 | 0.066 | 0.041 | +0.36 sd |
+| **DomainLength** | 9.308 | 8.989 | 9.453 | **−0.03 sd** |
+
+`DomainLength` is not involved. The training classes barely separate on it (0.07 sd
+apart; legitimate domains are marginally **longer** than phishing ones). And the
+mechanism the claim rested on was already removed in `0ca9429`, which redefined the
+feature as the length of the registrable **label** only — so `gtbank.com.ng` and
+`gtbank.com` both score 6. The `gtbank.com.ng = 0.678` figure quoted as evidence
+predates that change.
+
+**The reasoning error is the transferable part.** `DomainLength` ranks #2 by Gini
+importance (0.1238), and that was read as "it causes the false positives". Importance
+measures how often a feature is split on, interactions included — not marginal class
+separation, and not error attribution. Retracted in all three documents.
+
+### The obvious corpus fix was also wrong, and cheap to rule out
+
+The driver is suffix trust, so the natural move is to broaden the legit class's suffix
+coverage by drawing from deeper Cisco ranks. Measured first: mean suffix trust is
+**~0.785 across the entire top-1m at every rank depth** (8k samples per band) — 0.786 at
+top-55k, 0.784 at 55k–120k, 0.785 at 120k–300k, 0.790 at 300k–500k. The legit class is
+already representative on average, and `com.ng` is 0.00% of both pools. Sampling deeper
+would have changed nothing. That check cost one query and saved a retrain.
+
+The real gap is in the **tail**: only 0.9% of training legit sits below 0.35 trust,
+while the flagged sites concentrate there (mean 0.596).
+
+### The experiment: hard-example oversampling, not distribution matching
+
+Substituted 10,000 top-sites entries with real legit domains on low-trust suffixes
+(`.app` 0.095, `.co` 0.182, `.site` 0.140, `.xyz` 0.292) drawn from ranks 55k–500k.
+Deliberately **not** matched to the phishing distribution — that would neutralise a
+feature whose signal is real and cost recall. Legit class size held constant so class
+balance, and therefore whether SMOTE runs, is not a confound.
+
+Both arms retrained on identical code, scored on the same band (rank ≥500,000, so the
+enrichment band is disjoint):
+
+| metric | enrichment OFF | enrichment 10,000 | shipped model |
+|---|---|---|---|
+| sampled ML FPR (n=4,000) | 16.3% | 15.7% | **14.9%** |
+| sampled pipeline FPR | 11.5% | 11.1% | 10.4% |
+| sampled hard red alarms | 1.2% | **0.5%** | 1.0% |
+| phishing recall | 87.66% | 86.86% | 88.80% |
+| held-out accuracy | 90.64% | 89.84% | 91.58% |
+| in-corpus FPR | 6.62% | 7.44% | 5.87% |
+| 5-fold CV | 0.9038 | 0.8957 | — |
+| forest nodes | 864,614 | 935,950 | 806,620 |
+
+**Rejected**, against a rule fixed before the numbers existed (keep if sampled ML FPR
+improves >1pt and recall drops <2pt). 0.6 points of FPR bought with 0.8 of recall, 0.9 of
+precision, 0.8 of held-out accuracy, 0.8 of in-corpus FPR and 8% more model. Decisive:
+at 15.7% the enriched model is still worse than the committed model already shipping
+(14.9% on the same band), so adopting it would regress the headline metric *and* force a
+full re-qualification. `N_LOW_TRUST_LEGIT` is now 0; the code and ablation stay so the
+result is reproducible by flipping one constant.
+
+**One finding kept:** hard red alarms more than halved, 1.2% → 0.5% sampled and
+0.7% → 0.0% curated. The enrichment genuinely lowers model *confidence* on
+low-trust-suffix legit sites, moving them out of the blocking band into amber. Only
+PHISHING blocks, so this is the lever to revisit if hard-red rate ever becomes the
+primary objective rather than flagged-rate.
+
+### Two guards added, both of which immediately earned their place
+
+- **Contamination guard.** Training on the validation band would make the acceptance
+  metric silently meaningless — nothing downstream would look wrong. So
+  `validate_unknown_legit.py` imports `TRAIN_RANK_MAX` from `train.py` and refuses to
+  run if the validation floor sits below it, rather than trusting two constants to be
+  edited together. With the enrichment off, `TRAIN_RANK_MAX` tracks back to
+  `N_TOP_SITES`, which is what lets the floor return to its historical 120,000 and keeps
+  every published FPR figure comparable.
+- **Curated-overlap check.** Rank bands do not protect a hand-listed population. The
+  first enrichment draw pulled in `jumia.com.ng`, a curated validation domain, which
+  would have contaminated 4 of the 144 curated URLs. The curated list now lives in
+  [`features/validation_sets.py`](ml-pipeline/features/validation_sets.py) as one copy,
+  imported by the validator and by `train.py` so the enrichment can exclude it.
+
+### A third guard, added after I tripped the wire myself
+
+Moving `CURATED_PATHS` into `validation_sets.py`, I retyped it instead of copying it —
+9 entries instead of 14, with `/contact` altered to `/contact-us`. The harness reported
+sampled ML FPR 15.8% and hard red 1.2% instead of 15.4% and 0.8%, with no error and
+nothing downstream looking wrong. It was caught only because those figures were expected
+to reproduce *exactly* after a refactor that should have been behaviour-neutral.
+
+Both lists are now byte-verified against git, and `validation_sets.py` asserts their
+lengths as a canary so an accidental truncation fails loudly. Worth noting the shape:
+this is the same "harness measures something adjacent to what ships" failure documented
+in `memory.md` §1, introduced while fixing another instance of it. Re-running a known
+measurement after a refactor is what caught it — that habit is the actual control.
+
+An infra-host skew was also checked and found absent (`.app`/`.dev` are heavy with
+machine endpoints): uuid-ish hostnames 0.80% in the enrichment vs 0.78% in the baseline
+draw, mean digit ratio 0.047 vs 0.045. No filter added, so the experiment stayed
+single-variable.
+
+### Conclusion: the residual FPR is an information ceiling
+
+`.app` carries 6,368 phishing rows against 200 legitimate; `.co` 0.182; `.xyz` 0.292.
+Those suffixes are genuinely phishing-heavy, real legitimate sites on them are a small
+minority, and a URL string alone does not separate the minority from the majority. Every
+*feature*-level attempt on this metric has failed and the two *corpus*-level successes
+(path structure 60.4% → 18.1%; query/digit composition 20.8% → 15.4%) both closed
+artifacts that no longer exist. This one is not an artifact.
+
+That is the honest dissertation finding, and it is why the architecture has a reputation
+layer: the number a user experiences is the **9.4% pipeline** figure, not the 15.4%
+ML-tier one, and only **0.8%** of unknown-legitimate sites see a blocking red alarm.
+
+---
+
+## August 15, 2026 — The FPR harness now measures the model that ships
 
 `validate_unknown_legit.py` — the script that produces the project's primary acceptance
 metric — loaded `models/random_forest.pkl`, i.e. whatever `train.py` last produced

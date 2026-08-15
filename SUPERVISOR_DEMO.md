@@ -132,11 +132,20 @@ Verdict bands (calibrated): **CLEAN < 0.50** · **SUSPICIOUS 0.50–0.90** ·
 
 ## Known follow-ups (if the supervisor digs)
 
-- **Unknown-legit FPR still above the <10% target** (~16% ML-tier). Root cause
-  diagnosed: `DomainLength` is the model's **#2 feature** (0.1238 importance) and
-  encodes suffix structure as risk, so mechanically longer regional domains
-  (`gtbank.com.ng`) are penalised. Removing the length features was tested and
-  nearly doubled FPR (18.1% → 34.7%), so the fix is corpus-level, not feature-level.
+- **Unknown-legit FPR still above the <10% target** (15.4% ML-tier, 9.4% pipeline).
+  Root cause measured, not assumed: of the legitimate sites the model flags, the
+  distinguishing feature is `TLDLegitimateProb` at **+1.59 sd** — they sit on
+  suffixes that are genuinely phishing-heavy (`.app` 0.095, `.co` 0.182,
+  `.xyz` 0.292). `DomainLength`, blamed for this in earlier drafts, measures
+  **−0.03 sd** and is not involved; that retraction is worth mentioning, because it
+  came from confusing feature *importance* with *error attribution*.
+  Reproduce with `python ml-pipeline/diagnose_fpr.py`.
+- **The obvious fixes are both closed by measurement.** Removing the length features
+  nearly doubled FPR (18.1% → 34.7%). Oversampling legitimate sites on low-trust
+  suffixes bought 0.6pt of FPR for 0.8pt of recall and left the model still worse
+  than the one shipping — rejected, full ablation in `SOURCE_OF_TRUTH.md` §3a. What
+  remains is an information ceiling: `.app` really is 6,368 phishing rows against
+  200 legitimate, and a URL string alone cannot separate the honest minority.
 - **Training is reproducible** — verified Aug 15, 2026 by two consecutive runs of
   `train.py` producing identical forests (864,614 nodes) and identical metrics
   (90.64% / FPR 6.62% / CV 0.9038). A retrain takes ~5 min, so corpus experiments give

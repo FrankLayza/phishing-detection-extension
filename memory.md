@@ -147,11 +147,26 @@ only 8/18 curated sites. Unknown-legit accuracy must come from the ML tier.
 
 ## 4. Feature-level findings
 
-- **`DomainLength` is the prime suspect** for the residual FPR. Compound suffixes
-  are mechanically longer than `.com`, so the feature encodes suffix structure as
-  risk. With TLD trust neutral for `com.ng` (0.477), those sites are still 7/8
-  flagged (`gtbank.com.ng/personal-banking` = 0.678). SHAP agrees: value↔SHAP
-  correlation strengthened +0.14 → **+0.32**.
+- **`DomainLength` is NOT the FPR driver — retracted Aug 15, 2026.** This was the
+  standing diagnosis across the docs for days. Measured against the flagged
+  population (`diagnose_fpr.py`) it contributes **−0.03 sd**, and the training
+  classes barely differ on it (legit 9.31 vs phishing 8.99). The compound-suffix
+  mechanism it rested on was already removed in `0ca9429`, which redefined the
+  feature as the registrable **label** length, so `gtbank.com.ng` scores the same 6
+  as `gtbank.com`.
+
+  **The reasoning error is the reusable part:** `DomainLength` ranks #2 by Gini
+  importance (0.1238), and that was read as "it causes the false positives".
+  Importance measures use in splits, including interactions — not marginal class
+  separation, and not error attribution. Always measure the suspect feature against
+  the *failing population*, which is what `diagnose_fpr.py` now does in one command.
+- **The real driver is `TLDLegitimateProb`, at +1.59 sd** (2.5× the next factor).
+  Flagged legit sites average 0.596 suffix trust vs the training legit class's 0.779.
+  But this is *not* an aggregate mismatch — mean suffix trust is ~0.785 across the
+  entire top-1m at every rank depth, so the legit class is already representative on
+  average, and drawing from deeper Umbrella ranks changes nothing (0.786 at top-55k
+  vs 0.784 at 55k–120k, measured). The gap is in the tail: only 0.9% of training
+  legit sits below 0.35 trust. Oversampling that tail was tried and rejected — see §6a.
 - **Two feature fixes aimed at FPR both made the metric worse, and both were kept.**
   (a) `URLSimilarityIndex` path leak — `/apply` scored 0.80 against "apple"; fixed by
   gating on typo *pattern*; curated FPR 18.1% → 20.8%, because the buggy feature
@@ -176,9 +191,10 @@ only 8/18 curated sites. Unknown-legit accuracy must come from the ML tier.
   nothing to brand-impersonation detection; the reputation layer does all of it. Treat
   this as evidence *for* the architecture, and quote it if anyone asks why the guard
   isn't "just a feature".
-- **`DomainLength` is the #2 feature** at 0.1238 importance, behind only
-  `TLDLegitimateProb` (0.2967). The FPR diagnosis is confirmed by the model's own
-  importances, not just by SHAP.
+- **Feature importances (current retrain):** `TLDLegitimateProb` 0.2967,
+  `DomainLength` 0.1238, `URLCharProb` 0.1194, `NoOfSubDomain` 0.0782. Read these as
+  "what the model splits on", *not* as "what causes the false positives" — see the
+  retraction above for why that inference failed here.
 - **The pattern that predicts success on this metric:** every *corpus*-level
   intervention has worked (path structure 60.4% → 18.1%; query/digit composition
   20.8% → 15.4% sampled) and every *feature*-level one has failed (path brand gate,
@@ -221,6 +237,42 @@ re-exported explicitly via `export_model_json.py`. Verified Aug 15: the file in
 Measure any candidate retrain with `validate_unknown_legit.py --model pkl` **before**
 exporting — the default path scores the committed JSON, so it would not see your retrain
 at all.
+
+## 6a. Rejected: low-trust suffix oversampling ⚠️
+
+Aug 15, 2026. The only untried lever on the real FPR driver, measured and rejected.
+
+10,000 top-sites entries substituted with real legit domains on low-trust suffixes
+(`.app` 0.095, `.co` 0.182, `.site` 0.140, `.xyz` 0.292) from Cisco ranks 55k–500k;
+class size held constant; validation floor moved to 500k so the bands stayed disjoint.
+
+Result: sampled ML FPR 16.3% → 15.7% (+0.6pt gain) against recall 87.66% → 86.86%,
+held-out accuracy 90.64% → 89.84%, in-corpus FPR 6.62% → 7.44%, nodes +8%. And at 15.7%
+it is *still worse than the shipped model* (14.9% on the same band), so adopting it
+would regress the headline metric. Reproduce with `N_LOW_TRUST_LEGIT = 10000`.
+
+**Keep this finding:** hard red alarms more than halved, 1.2% → 0.5% (0.7% → 0.0%
+curated). It reduces model *confidence* on those sites, moving them from blocking-red
+into amber. Only PHISHING blocks, so this is the lever to revisit if hard-red rate ever
+becomes the objective.
+
+**Three process lessons from the run:**
+- **A decision rule fixed in advance is what made the rejection easy.** "Keep if FPR
+  improves >1pt and recall drops <2pt" was written down before the numbers existed. The
+  0.6pt result was tempting to accept in isolation.
+- **Rank bands do not protect a hand-listed population.** An overlap check caught
+  `jumia.com.ng` — a curated validation domain — entering the enrichment pool. The
+  curated list now lives in `features/validation_sets.py` and `train.py` imports it to
+  exclude it. One copy is what made the check possible.
+- **A list that defines a metric must be COPIED, never retyped.** Moving
+  `CURATED_PATHS` into that shared module, I reconstructed it from memory: 9 entries
+  instead of 14, `/contact` altered to `/contact-us`. Sampled ML FPR silently moved
+  15.4% → 15.8% and hard red 0.8% → 1.2%. Nothing errored; the harness reported
+  confident wrong numbers. Caught only because those figures were expected to reproduce
+  *exactly*, which is the whole reason to re-run a known measurement after a refactor.
+  `validation_sets.py` now asserts both list lengths as a canary. Note the shape of this
+  failure: it is the same "harness measures something adjacent to what ships" family as
+  §1, introduced while fixing §1 — the trap catches the person documenting it too.
 
 ## 7. Performance: cold start, not inference ⚠️
 

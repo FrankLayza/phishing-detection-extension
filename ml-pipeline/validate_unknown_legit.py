@@ -51,8 +51,31 @@ from features.lexical_extractor import extract_lexical_features
 N_TOP_SITES = 55000
 # Sample unknown-legit domains from below this rank so they cannot overlap
 # the training slice even if N_TOP_SITES is raised somewhat.
+#
+# This is 120,000 because the training corpus stops at N_TOP_SITES = 55,000.
+# It was briefly raised to 500,000 for the Aug 15, 2026 low-trust suffix
+# experiment, whose enrichment drew real legit domains from ranks 55k-500k; that
+# experiment was measured and rejected (see train.py N_LOW_TRUST_LEGIT), so the
+# floor is back at its historical value and every published FPR figure stays
+# comparable.
+#
+# Do not edit this number by hand against train.py's. The assertion below derives
+# the constraint from train.py's own TRAIN_RANK_MAX, which tracks whether the
+# enrichment is enabled -- silent contamination of this metric is the single worst
+# failure mode available here, because nothing downstream would look wrong.
 UNKNOWN_RANK_FLOOR = 120000
 N_SAMPLED = 4000
+
+try:
+    from train import TRAIN_RANK_MAX as _TRAIN_RANK_MAX
+except Exception:          # train.py unavailable (e.g. partial checkout)
+    _TRAIN_RANK_MAX = None
+if _TRAIN_RANK_MAX is not None and UNKNOWN_RANK_FLOOR < _TRAIN_RANK_MAX:
+    raise SystemExit(
+        f'CONTAMINATED: validation floor {UNKNOWN_RANK_FLOOR} is below train.py '
+        f'TRAIN_RANK_MAX {_TRAIN_RANK_MAX}. The unknown-legit population would '
+        f'overlap the training corpus and the FPR would be meaningless. Raise '
+        f'UNKNOWN_RANK_FLOOR to >= {_TRAIN_RANK_MAX}.')
 
 # The artifact the extension loads. Default scoring target — see ShippedModel.
 SHIPPED_MODEL_JSON = 'phishing-extension/assets/phishing_model.json'
@@ -71,34 +94,11 @@ PHISH_MIN = 0.90
 # Do not "fix" this by appending slashes to path URLs -- there a trailing slash is
 # real path structure and would change the features.
 
-# Real legitimate sites, deliberately outside the Western top-30k the
-# allowlist covers. These are the population the pre-fix model failed on.
-CURATED_BARE = [
-    # Nigerian / African banking & fintech
-    'gtbank.com', 'zenithbank.com', 'firstbanknigeria.com', 'uba.com',
-    'accessbankplc.com', 'stanbicibtcbank.com', 'fidelitybank.ng',
-    'flutterwave.com', 'paystack.com', 'interswitchng.com', 'moniepoint.com',
-    # African e-commerce & media
-    'jumia.com.ng', 'konga.com', 'jiji.ng', 'punchng.com', 'vanguardngr.com',
-    'premiumtimesng.com', 'nairaland.com', 'takealot.com', 'news24.com',
-    # Regional / non-Western mainstream
-    'rediff.com', 'indiatimes.com', 'kompas.com', 'detik.com',
-    'mercadolibre.com.ar', 'olx.com.br', 'sahibinden.com', 'hepsiburada.com',
-    # Small business / institutional patterns
-    'oakwood-dental-clinic.com', 'joesplumbingleeds.co.uk',
-    'stmarysprimary-ng.org', 'lagostechhub.com.ng',
-    'riverside-veterinary.co.uk', 'thecornerbakery-ng.com',
-    'greenfield-academy.edu.ng', 'westside-physio.com.au',
-]
-
-# Realistic paths a legitimate site of each kind would serve.
-CURATED_PATHS = [
-    '/about', '/contact', '/services', '/products/catalogue',
-    '/login', '/account/settings', '/blog/2026/announcement',
-    '/support/faq', '/careers/openings', '/branches/lagos-island',
-    '/personal-banking/savings-accounts', '/book-appointment',
-    '/admissions/requirements', '/search?q=account&page=2',
-]
+# The curated validation population lives in features/validation_sets.py so that
+# train.py can import it and EXCLUDE those domains from corpus enrichment. Keeping
+# one copy is what let an overlap check catch jumia.com.ng entering the training
+# pool during the Aug 15 low-trust experiment.
+from features.validation_sets import CURATED_BARE, CURATED_PATHS
 
 
 def load_model():

@@ -61,7 +61,8 @@ its tenants were being hard-cleared).
 
 ## 3. Open work queue
 
-Ranked. A was investigated and cleared, B is done; **C is now the top item**.
+Ranked. A was cleared, B is done, C was run and its intervention rejected on
+measurement; **D and E are what remain, and both are judgement calls rather than work**.
 
 ### A — RESOLVED: training IS reproducible (was flagged as a blocker)
 
@@ -129,24 +130,57 @@ Residual approximation: 5 of 4,000 sampled URLs (0.12%) are platform tenants, wh
 harness models adapter A only. It counts and prints them, bounding the error at ~0.13 pt,
 and deliberately does not reimplement `reputation.ts`.
 
-### C — the FPR gap itself (now the top item)
+### C — DONE (intervention rejected): the FPR gap is an information ceiling
 
-ML-tier FPR ~16% against a <10% target. Root cause diagnosed: `DomainLength` is the
-model's **#2 feature** (0.1238 importance) and encodes suffix structure as risk, so
-mechanically longer regional domains (`gtbank.com.ng`) are penalised.
+Ran the corpus experiment. Three measurements, each of which changed the plan:
 
-Do **not** try removing the length features — tested, and curated FPR nearly doubled
-(18.1% → 34.7%) with recall and accuracy both down (`feature_config.py:28-32`).
+**1. The inherited diagnosis was false.** `DomainLength` — blamed across the docs —
+contributes **−0.03 sd** against the flagged population. The training classes barely
+differ on it (legit 9.31 vs phishing 8.99; legit domains are marginally *longer*), and
+the compound-suffix mechanism it rested on was already removed in `0ca9429`, which
+redefined the feature as the registrable **label** length. Its #2 Gini importance
+(0.1238) reflects use in interaction splits, not error attribution. Retracted in
+`SOURCE_OF_TRUTH.md`, `memory.md` and `SUPERVISOR_DEMO.md`.
 
-The lever is corpus-level: distribution-match the legitimate class against the
-phishing class on **domain length and suffix shape**, the same technique that already
-worked twice on this project (path structure 60.4% → 18.1%; query/digit composition
-20.8% → 15.4% sampled). Note that every *feature*-level attempt on this metric has
-failed and every *corpus*-level attempt has succeeded.
+**2. The real driver is `TLDLegitimateProb` at +1.59 sd** (2.5x the next factor).
+Flagged legit sites average 0.596 suffix trust vs training legit's 0.779.
 
-Watch the validation-contamination trap: the honest unknown-legit population is
-top-1m rank ≥120,000. Training on deep ranks burns it. Partition instead (e.g. train
-55k–300k, validate 500k+).
+**3. But "distribution-match the legit class" was also wrong.** Mean suffix trust is
+~0.785 across the *entire* top-1m at every rank depth, so the legit class is already
+representative on average — drawing from deeper Umbrella ranks changes nothing (0.786
+at top-55k vs 0.784 at 55k–120k, measured on 8k samples per band). The gap is in the
+tail: only 0.9% of training legit sits below 0.35 trust.
+
+So the experiment became hard-example oversampling: substitute 10,000 top-sites entries
+with real legit domains on low-trust suffixes, class size held constant.
+
+| metric | OFF | 10,000 | shipped model |
+|---|---|---|---|
+| sampled ML FPR | 16.3% | 15.7% | **14.9%** |
+| sampled pipeline FPR | 11.5% | 11.1% | 10.4% |
+| hard red alarms | 1.2% | **0.5%** | 1.0% |
+| recall | 87.66% | 86.86% | 88.80% |
+| held-out accuracy | 90.64% | 89.84% | 91.58% |
+| nodes | 864,614 | 935,950 | 806,620 |
+
+**Rejected** against a decision rule fixed before the numbers existed (keep if FPR
+improves >1pt and recall drops <2pt). 0.6pt of FPR for 0.8pt of recall, 0.9 of
+precision, 0.8 of accuracy and 8% more model — and at 15.7% still worse than what
+already ships. Reproduce with `N_LOW_TRUST_LEGIT = 10000` in `train.py`; the code and
+the full ablation are kept, only the constant is zero.
+
+**Worth revisiting only if the objective changes:** hard red alarms more than halved
+(1.2% → 0.5%). Only PHISHING blocks navigation, so if hard-red rate becomes the primary
+objective rather than flagged-rate, this is the one lever measured so far that moves it.
+
+**What remains is an information ceiling, not a corpus bug.** `.app` carries 6,368
+phishing rows against 200 legitimate; `.co` 0.182; `.xyz` 0.292. Real legitimate sites
+on those suffixes are a genuine minority and a URL string does not separate them. That
+is why the reputation layer exists, and why 9.4% pipeline — not 15.4% ML-tier — is the
+number a user experiences.
+
+Tooling added: `ml-pipeline/diagnose_fpr.py` reproduces the whole diagnosis in one
+command and records its own findings in its docstring.
 
 ### D — the one design decision deliberately not taken
 
@@ -179,10 +213,22 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
 2. ~~Re-point the FPR harness at the shipped model~~ — **done** (§3 B). "What is your
    false positive rate?" now has a defensible answer: 15.4% ML-tier / 9.4% pipeline on
    n=4,000, measured on the forest the extension loads.
-3. **The corpus experiment** (§3 item C) — distribution-match domain length and suffix
-   shape in the legitimate class. This is now the top item. Retrains are ~5 min and
-   reproducible, so before/after comparisons are directly interpretable; measure each
-   arm with `validate_unknown_legit.py --model pkl` before exporting anything.
+3. ~~The corpus experiment~~ — **done, intervention rejected** (§3 C). The diagnosis it
+   was based on turned out to be false, and the replacement intervention lost more than
+   it gained. The residual FPR is an information ceiling, which is a finding rather than
+   a task.
+
+**Nothing on this list is blocking a demo.** What is left is judgement, not work:
+
+4. Decide §3 D (whether brand impersonation should add risk rather than only withhold a
+   discount). Currently documented as a deliberate limitation and shown in the demo.
+5. Decide whether to extend `PLATFORM_HOSTS` to the user-content hosts listed in §3 E —
+   a data judgement about corporate tenants that could introduce false positives.
+6. For the write-up: the three strongest results are the train/serve parity gate
+   (0 mismatches / 20,160 values), the honest metric provenance (every figure measured
+   on the shipped artifact), and the documented ablations — including two rejected ones
+   and one retracted diagnosis. That last item is a contribution, not an embarrassment;
+   most published work on PhiUSIIL reports 99%+ by exploiting a contaminated column.
 5. If a retrain is adopted: re-export via `export_model_json.py`, regenerate
    `shap_mapping.json`, **re-calibrate the 0.50/0.90 bands** (`sweep_thresholds.py` —
    they were tuned to the old model's score distribution), re-measure, update
