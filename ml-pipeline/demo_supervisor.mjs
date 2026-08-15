@@ -69,7 +69,14 @@ async function run(url) {
   const features = extractPageFeatures(url, "");
   const repResult = await rep.evaluate(url, features);
   if (repResult.kind === "allowlisted") {
-    return { url, verdict: "CLEAN", score: 0.05, source: "allowlist", signals: repResult.signals.map((s) => s.feature).join(" + ") };
+    return {
+      url,
+      verdict: "CLEAN",
+      score: "0.050",
+      raw: "n/a (model skipped)",
+      correction: "n/a (hard allowlist)",
+      signals: repResult.signals.map((s) => s.feature).join(" + "),
+    };
   }
   let raw = mlScore(features);
   let score = raw;
@@ -83,7 +90,7 @@ async function run(url) {
     url,
     verdict: verdict(score),
     score: score.toFixed(3),
-    raw,
+    raw: raw.toFixed(3),
     correction: correctionApplied ? "YES (TLD neutralised)" : repResult.impersonation ? "WITHHELD (brand guard)" : "no",
     signals,
   };

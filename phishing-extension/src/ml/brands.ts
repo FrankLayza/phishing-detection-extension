@@ -99,20 +99,6 @@ export function typoSimilarity(candidate: string, brand: string): number {
 }
 
 /**
- * Highest typo-similarity of `token` against any tracked brand, exact match
- * scoring 1.0. Returns 0 when no brand is close enough to matter.
- */
-export function brandSimilarityOf(token: string): number {
-  let max = 0.0;
-  for (const brand of BRANDS) {
-    if (token === brand) return 1.0;
-    const sim = typoSimilarity(token, brand);
-    if (sim > max) max = sim;
-  }
-  return max < TYPO_THRESHOLD ? 0.0 : max;
-}
-
-/**
  * Whether a subdomain carries a brand token — the reputation-side check.
  *
  * Phishing deployed on hosting platforms hides the brand in the subdomain
@@ -120,27 +106,36 @@ export function brandSimilarityOf(token: string): number {
  * is the platform, so the model's domain similarity sees only 'netlify' and
  * scores 0. This scans the subdomain labels instead.
  *
- * A subdomain that IS exactly one brand label ('microsoft.github.io' — the
- * org's own project page) is SKIPPED: it is lexically identical to a squat on
- * a platform, indistinguishable without reputation, and the corpus counts it
- * legitimate. Only compound labels and multi-label subdomains fire.
+ * `allowBareBrandLabel` exempts a subdomain that IS exactly one brand label
+ * ('microsoft.github.io'). Pass it ONLY for platforms whose subdomain namespace
+ * is identity-bound — `<name>.github.io` requires owning the `name` org, so the
+ * bare label really is the brand's own project page. On a deploy-anywhere
+ * platform the same name is first-come-first-served, so 'paypal.vercel.app' is
+ * claimable by anyone and must NOT be exempt. The caller owns that distinction
+ * (see IDENTITY_BOUND_PLATFORMS in reputation.ts); this module only knows brands.
  */
-export function brandTokenInSubdomain(subdomain: string): string | null {
+export function brandTokenInSubdomain(
+  subdomain: string,
+  allowBareBrandLabel = false
+): string | null {
   if (!subdomain) return null;
   const labels = subdomain.split(".").filter((s) => s);
   const singleLabel = labels.length === 1;
   for (const label of labels) {
     const tokens = label.split("-");
     // <brand>.github.io — the org's own project page. Skip ONLY the whole-label
-    // exact case; a brand token beside other tokens is impersonation.
-    if (singleLabel && tokens.length === 1 && BRANDS.includes(tokens[0])) {
+    // exact case, and only on an identity-bound platform. A brand token beside
+    // other tokens is impersonation regardless.
+    if (allowBareBrandLabel && singleLabel && tokens.length === 1 && BRANDS.includes(tokens[0])) {
       continue;
     }
     for (const token of tokens) {
       for (const brand of BRANDS) {
         if (token === brand) return brand;
-        const sim = typoSimilarity(token, brand);
-        if (sim > TYPO_THRESHOLD) return brand;
+        // >=, not >: TYPO_THRESHOLD is inclusive everywhere else (Python uses
+        // `< THRESHOLD -> 0`). With `>` a single transposition of a 5-letter
+        // brand landed on exactly 0.6 and slipped the guard ('paple' <- 'apple').
+        if (typoSimilarity(token, brand) >= TYPO_THRESHOLD) return brand;
       }
     }
   }

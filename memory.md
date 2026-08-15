@@ -43,6 +43,38 @@ the icon. Several bugs were only ever caught that way.
    click-through spot-check from before Aug 10, 2026 proved nothing, because it
    could not distinguish a fresh verdict from a stale one.
 
+### …make that five ⚠️
+
+5. **The headline FPR measures a model that isn't shipped.** Discovered Aug 15, 2026.
+   `validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension
+   loads `assets/phishing_model.json`. Different forests — 846k–865k nodes versus
+   806,620. Every unknown-legit FPR figure in the docs therefore describes a model
+   nobody runs. Exactly the same trap as `test_url.py`, which was already flagged for
+   it; nobody noticed it also applied to the project's primary acceptance metric.
+   The same harness also uses `PHISH_MIN = 0.85` against a shipped red band of 0.90,
+   and builds URLs with no root slash — so it is wrong on three axes at once.
+
+## 1a. Training is not reproducible ⚠️
+
+Discovered Aug 15, 2026. Three seeded runs of `train.py` on unchanged code produced
+three different forests: **806,620** (shipped) / **846,454** / **864,614** nodes.
+In-corpus metrics are stable to ~0.02 pt, so it is structural drift rather than a
+different model class.
+
+`SOURCE_OF_TRUTH.md` used to assert byte-identical reproducibility. That was true of
+the 691,570-node model it described and is false of the current pipeline; the claim is
+now marked superseded there.
+
+**Prime suspect:** an unseeded RNG, or `set`/`dict` iteration order in the corpus
+builder — Python randomises string hashing per process unless `PYTHONHASHSEED` is
+pinned, so sampling from a `set` of domains picks a different subset every run.
+
+**Why it matters more than it looks:** it silently invalidates before/after
+comparisons. Any corpus experiment aimed at the FPR is uninterpretable until this is
+fixed, because you cannot separate your intervention from run-to-run noise. Fix
+determinism, prove it with two identical runs, then measure the noise floor across
+2–3 deliberately different seeds before trusting any improvement.
+
 ## 2. The root slash — and a correction ✅
 
 **Corrected Aug 15, 2026 by direct measurement of `datasets/phiusiil.csv`.**
@@ -117,6 +149,18 @@ only 8/18 curated sites. Unknown-legit accuracy must come from the ML tier.
   brand tokens in compound subdomains collapsed `URLSimilarityIndex` to 0.0037
   importance at FPR 6.54%, because legit CDN rows (`apple-relay.cloudflare.com`)
   legitimately carry brand tokens. That is why the guard lives in `reputation.ts`.
+- **`URLSimilarityIndex` is inert in the shipped model too** — 0.0036 importance,
+  dead last of 21 features (measured Aug 15, 2026). The model contributes essentially
+  nothing to brand-impersonation detection; the reputation layer does all of it. Treat
+  this as evidence *for* the architecture, and quote it if anyone asks why the guard
+  isn't "just a feature".
+- **`DomainLength` is the #2 feature** at 0.1238 importance, behind only
+  `TLDLegitimateProb` (0.2967). The FPR diagnosis is confirmed by the model's own
+  importances, not just by SHAP.
+- **The pattern that predicts success on this metric:** every *corpus*-level
+  intervention has worked (path structure 60.4% → 18.1%; query/digit composition
+  20.8% → 15.4% sampled) and every *feature*-level one has failed (path brand gate,
+  data-derived TLD table, dropping length features). Aim new attempts at the corpus.
 
 ## 5. Dead ends — do not re-investigate
 

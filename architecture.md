@@ -132,7 +132,8 @@ Feature list: see `src/types/index.ts` (`FeatureVector`).
 
 ## 5. Invariants
 
-Break one of these and the product is silently wrong.
+Break one of these and the product is silently wrong. Items 4, 5 and 9 are currently
+**violated** and tracked in `handoff.md` §3.
 
 1. **Train/serve parity.** `check_parity.py` must report 0 mismatches across
    20,160 values (960 URLs × 21). Run it after *any* extractor edit.
@@ -144,12 +145,18 @@ Break one of these and the product is silently wrong.
 4. **The committed model is authoritative.** `assets/phishing_model.json` does
    *not* byte-reproduce from current code; a retrain yields a different forest and
    ~0.8pt worse FPR. Never silently replace it. (`SOURCE_OF_TRUTH.md` §3.)
-5. **Reputation may soften, never alarm.** Only the allowlist is hard authority.
+5. **Training is currently non-deterministic** — three seeded runs gave 806,620 /
+   846,454 / 864,614 nodes. Until fixed, no before/after model comparison is valid.
+   (`handoff.md` §3 A.)
+6. **Reputation may soften, never alarm.** Only the allowlist is hard authority.
    The platform adapter can lower a score, never raise one.
-6. **A verdict must never outlive its page.** Two layers: URL equality check in
+7. **A verdict must never outlive its page.** Two layers: URL equality check in
    the popup, plus `tabs.onUpdated` eviction.
-7. **Browser URL shape ≠ corpus URL shape.** Chrome sends `https://d/`; the
+8. **Browser URL shape ≠ corpus URL shape.** Chrome sends `https://d/`; the
    corpus holds `https://d`. That trailing slash was worth +26 points of FPR.
+9. **Measure the artifact that ships.** `validate_unknown_legit.py` currently loads
+   `random_forest.pkl`, not the shipped JSON, so its FPR figures describe a different
+   model. (`handoff.md` §3 B.)
 
 ## 6. The reputation layer
 
@@ -158,16 +165,28 @@ One seam, three adapters of deliberately different authority (vocabulary in
 
 | Adapter | Authority | Effect |
 |---|---|---|
-| **A — domain allowlist** (`assets/top_domains.json`, 30k) | **Hard** | Registrable domain match → CLEAN 0.05, model skipped entirely. |
+| **A — domain allowlist** (`assets/top_domains.json`, 30k) | **Hard** | Registrable domain match → CLEAN 0.05, model skipped entirely. **Not consulted for platform tenants** (see caveat). |
 | **B — suffix trust** (`tld-rates.ts`) | Feeds a feature | Drives `TLDLegitimateProb` inside the extractor. Peer adapter so trust knowledge has one home. |
-| **C — hosting platforms** (`PLATFORM_HOSTS`, 18 suffixes) | **Advisory** | Neutralises `TLDLegitimateProb` to the corpus prior. Other 20 features untouched. |
+| **C — hosting platforms** (`PLATFORM_HOSTS`, 19 suffixes) | **Advisory** | Neutralises `TLDLegitimateProb` to the corpus prior. Other 20 features untouched. |
 
-Two immunity rules protect adapter C from clearing real phish:
+Three rules protect adapter C from clearing real phish:
 
 - **Hard-red immunity** — the model scores the **raw** vector first; only a raw
   score `< 0.90` may be re-scored with the corrected vector.
 - **Brand-impersonation immunity** — the correction is withheld entirely when
   `brandTokenInSubdomain` fires, at any score.
+- **Tenant isolation** — adapter A is skipped when the host is a *tenant* under a
+  platform (`host !== platform && host.endsWith("." + platform)`). A tenant is not
+  its platform.
+
+The bare-brand-label exemption (`microsoft.github.io` is Microsoft's own page) applies
+only on `IDENTITY_BOUND_PLATFORMS` — `github.io`, `gitlab.io` — where holding the label
+required holding the identity. On a deploy-anywhere platform the same name is a
+first-come-first-served project name, so `paypal.vercel.app` stays guarded.
+
+**Known limit, by design:** the guard only *withholds* the discount; it never adds
+risk. A clone the model scores below 0.50 on raw features still reads CLEAN. See
+`CONTEXT.md`, "Withholding is not accusing".
 
 > **Structural caveat that shapes all of adapter C.** `psl-trie.ts` is
 > **ICANN-only** — it contains no private suffixes (`vercel.app`, `netlify.app`,
@@ -176,9 +195,16 @@ Two immunity rules protect adapter C from clearing real phish:
 > is **`vercel.app`** — the platform itself, not the tenant. Two consequences:
 >
 > 1. The brand guard works *because* the tenant name lands in `subdomain`.
-> 2. Adapter A is consulted with the **platform's** domain. If a platform appears
->    in `top_domains.json`, every tenant under it is hard-cleared before adapter C
->    or the guard ever runs. This is live today — see `handoff.md` finding 1.
+> 2. Adapter A would otherwise be consulted with the **platform's** domain. Several
+>    platforms are popular enough to sit in the top-30k list (`railway.app`,
+>    `neocities.org`), which cleared every tenant under them to CLEAN 0.05 before the
+>    model or the guard ran. Fixed Aug 15, 2026 by the tenant-isolation rule above.
+>
+> Residual gap: user-content hosts that are in the allowlist but *not* on
+> `PLATFORM_HOSTS` still hard-clear their tenants — `sharepoint.com`, `typeform.com`,
+> `jotform.com`, `wix.com`, `windows.net`, `firebaseio.com`, `forms.gle`. Extending the
+> list is a data decision (a legit `contoso.sharepoint.com` must not become a false
+> positive), tracked in `handoff.md` §3 E.
 >
 > Adding private suffixes to the PSL trie would silently invert both behaviours.
 > It is a parity-affecting change (the Python side uses the same rule set) and must

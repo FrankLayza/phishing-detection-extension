@@ -75,6 +75,26 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 > retrain must be a reviewed decision (it changes FPR by ~0.8pt) and re-exported
 > via `export_model_json.py` explicitly.
 >
+> **⚠ SUPERSEDED (Aug 15, 2026): training is NOT currently reproducible.** The
+> paragraph below claimed re-running produced an identical forest and a
+> byte-identical `phishing_model.json`. That was true of the 691,570-node model it
+> described; it is false of the current pipeline. Three seeded runs of `train.py` on
+> unchanged code produced **three different forests**:
+>
+> | Artifact | Total nodes |
+> |---|---|
+> | Shipped `assets/phishing_model.json` | 806,620 |
+> | `random_forest.pkl` as of Aug 14 | 846,454 |
+> | Re-run Aug 15, same code and seeds | 864,614 |
+>
+> In-corpus metrics are stable to ~0.02 pt (90.64% acc / 6.62% FPR vs 90.65% / 6.64%),
+> so this is structural drift rather than a different model class. Likely cause is an
+> unseeded RNG or set-iteration order in the corpus builder — Python randomises string
+> hashing per process unless `PYTHONHASHSEED` is pinned. **This must be fixed before
+> any corpus experiment**, because otherwise an FPR change cannot be distinguished
+> from run-to-run noise.
+>
+> The original (now-superseded) claim, kept for provenance:
 > Training is fully seeded (`random_state=42` on the split, SMOTE and the forest).
 > Verified by re-running: identical metrics, identical forest (691,570 nodes, matching
 > thresholds) and a **byte-identical** `phishing_model.json`. Only `random_forest.pkl`
@@ -82,6 +102,16 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 > content — so don't treat a `.pkl` hash difference as a changed model.
 
 ### 3a. Unknown-legitimate FPR — the metric that actually gates the product
+
+> **⚠ Provenance warning (Aug 15, 2026).** `validate_unknown_legit.py:83` loads
+> `models/random_forest.pkl`, **not** the shipped `assets/phishing_model.json`. Those
+> are different forests (846k–865k nodes vs 806,620). Every unknown-legit FPR figure
+> in this section therefore describes a model the extension does not load, and — given
+> the reproducibility defect above — one that is not stable between runs either.
+> Re-measuring these populations through the shipped artifact (as `demo_supervisor.mjs`
+> already does for single URLs) is an open follow-up. Same trap family as
+> `test_url.py`, which is already flagged for loading the divergent pkl.
+
 Held-out accuracy measures the corpus, not the goal. The legitimate class is partly
 synthesized, so in-corpus accuracy stays high while genuinely unseen legitimate sites
 fail. Measured by `validate_unknown_legit.py` → `models/unknown_legit_validation.json`:
@@ -345,3 +375,35 @@ cd phishing-extension && pnpm build                                  # → build
   still gets the normal correction. Model untouched. Residual gaps: `instagram` not in the brand
   list, and non-platform brand squats (`microsoft-verify-login.example.com`) are still CLEAN —
   both need corpus-level work, not reputation.
+- **Guard hardened (Aug 15, 2026).** Review of the above found three verdict-level holes, all
+  now fixed and verified:
+  1. **The hard allowlist was clearing platform tenants.** The PSL trie is ICANN-only, so
+     `evil.railway.app` resolves to registrable domain `railway.app` — the platform, which is
+     itself in the top-30k list. Adapter A fired first and returned CLEAN 0.05 before the model
+     or the guard ran. `railway.app` and `neocities.org` were both affected. The allowlist is now
+     skipped for platform tenants (`isTenant` in `reputation.ts`).
+  2. **The bare-brand-label exemption was granted on every platform.** It is sound for
+     `microsoft.github.io` (the org owns the namespace) but was handing the same pass to anyone
+     who claimed a brand as a project name — `paypal.vercel.app` scored CLEAN 0.232. Now limited
+     to `IDENTITY_BOUND_PLATFORMS` (`github.io`, `gitlab.io`).
+  3. **Threshold boundary was exclusive.** `brandTokenInSubdomain` used `sim > 0.6` while the
+     Python extractor and `brandSimilarityOf` use `< 0.6 → 0`. A single transposition of a
+     5-letter brand lands on exactly 0.6, so `paple-login.vercel.app` slipped the guard at
+     CLEAN 0.253. Now `>=`.
+
+  Measured effect: 6 of 8 previously-cleared attack URLs are now flagged; 10 legitimate platform
+  tenants (including `railway.app` and `neocities.org` tenants that had relied on the allowlist)
+  all stay CLEAN at 0.181–0.299. Reported unknown-legit FPR is unchanged, because
+  `validate_unknown_legit.py` builds only bare domains and does not model the platform adapter
+  at all.
+
+  **Remaining by design:** the guard only withholds the platform discount, it never adds risk, so
+  a clone the model scores below 0.50 on raw features still reads CLEAN
+  (`paypal-verify-login.neocities.org` = 0.124, `.org` carrying high suffix trust). Escalating
+  impersonation to positive evidence was considered and rejected: it would add a third authority
+  type and flag legitimate brand-adjacent projects on free hosts. See `CONTEXT.md`,
+  "Withholding is not accusing".
+- **`URLSimilarityIndex` is effectively inert** (0.0036 importance, last of 21 features, measured
+  Aug 15, 2026). The model contributes almost nothing to brand-impersonation detection; the
+  reputation layer does that work. This is evidence *for* the architecture, and it explains why
+  the extractor-side experiment failed.

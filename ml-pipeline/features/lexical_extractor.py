@@ -52,11 +52,16 @@ def extract_lexical_features(url: str) -> dict:
     # Strip a lone ROOT trailing slash ('https://x.com/' -> 'https://x.com').
     #
     # A homepage is the single most common thing a user visits, and the browser
-    # always reports it slash-terminated (window.location.href). The training
-    # corpus contains the opposite: PhiUSIIL legitimate rows are 31.4%
-    # root-slash while phishing rows are 0.0%, and build_legit_urls() emits
-    # 'https://' + host + tail with no bare slash at all. So '/' became a
-    # label token, and every real homepage landed on the wrong side of it.
+    # always reports it slash-terminated (window.location.href). In the training
+    # corpus the root slash is a PHISHING-class token: measured on
+    # datasets/phiusiil.csv, 31.45% of phishing rows (31,744 / 100,945, label==0)
+    # end in a bare root slash against 0.00% of legitimate rows
+    # (0 / 134,850, label==1), and build_legit_urls() emits 'https://' + host +
+    # tail with no bare slash at all. So '/' pointed at phishing, and every real
+    # homepage landed on the wrong side of it.
+    # (Corrected Aug 15, 2026: this comment previously had the two classes
+    # swapped, which made the measurement below impossible to explain -- a
+    # legit-leaning token cannot push homepage scores up.)
     #
     # Measured on the shipped model, n=1,500 unknown-legit homepages:
     #   bare  https://d   ->  12.6% flagged (mean 0.256)

@@ -22,6 +22,21 @@ crystallize during design work; see `SOURCE_OF_TRUTH.md` for the measured model.
 - **Hard authority** — a reputation input that can alone decide a verdict. Only
   the domain allowlist is hard: a known-popular registrable domain (google.com)
   short-circuits to CLEAN before the model runs.
+- **Tenant** (added Aug 15, 2026) — a site deployed under someone else's hosting
+  platform (`my-portfolio.vercel.app`). A tenant is **not** its platform: the
+  allowlist is not consulted for tenants, because the PSL trie is ICANN-only and
+  therefore resolves `evil.railway.app` to the registrable domain `railway.app` —
+  the platform, which is itself popular enough to sit in the top-30k list.
+  Consulting it there cleared every tenant of a popular platform to CLEAN 0.05
+  before the model or the brand guard ran. Renting space in a well-known building
+  does not make you the landlord (`reputation.ts`, `isTenant`).
+- **Identity-bound platform** (added Aug 15, 2026) — a platform whose subdomain
+  namespace is tied to an account that had to be claimed, so `<brand>.<platform>`
+  really is the brand's own page. `microsoft.github.io` belongs to the Microsoft
+  org and nobody else can hold it. Only these platforms grant the bare-brand-label
+  exemption below; on a deploy-anywhere platform the same name is a
+  first-come-first-served project name. Currently `github.io` and `gitlab.io`
+  (`IDENTITY_BOUND_PLATFORMS` in `reputation.ts`).
 - **Advisory authority** — an input that can *never* clear a page on its own;
   it only removes a false reason to flag. The hosting-platform adapter is
   advisory: it neutralises `TLDLegitimateProb` to the corpus prior for
@@ -47,7 +62,17 @@ crystallize during design work; see `SOURCE_OF_TRUTH.md` for the measured model.
   (adapter C) via `brandTokenInSubdomain`; the verdict keeps a
   `BrandImpersonation` signal. A subdomain that IS exactly one brand label
   (`microsoft.github.io` — the org's own project page) is legitimate and gets
-  the normal correction.
+  the normal correction — but **only on an identity-bound platform**. That
+  exemption was originally granted on every platform, which handed it to anyone
+  who claimed a brand as a project name (`paypal.vercel.app` scored CLEAN 0.232);
+  narrowed Aug 15, 2026.
+- **Withholding is not accusing** (added Aug 15, 2026) — the brand guard only
+  removes the platform discount; it never adds risk. A clone the model scores
+  below 0.50 on its own raw features therefore still reads CLEAN
+  (`paypal-verify-login.neocities.org` = 0.124, where `.org` carries high suffix
+  trust). This follows from advisory authority and is a deliberate limit, not a
+  bug: making impersonation *positive* evidence would introduce a third authority
+  type and would flag legitimate brand-adjacent projects on free hosts.
 - **Why the guard lives in reputation, not the extractor** — a brand token
   inside a subdomain label is only separable by reputation. The model cannot
   tell `apple-relay.cloudflare.com` (legit CDN, allowlisted) from

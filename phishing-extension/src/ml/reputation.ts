@@ -6,6 +6,7 @@
  *   A. Domain allowlist (assets/top_domains.json)   - HARD authority
  *      A known-popular registrable domain (google.com). Short-circuits the whole
  *      model to CLEAN. This is the real site; URL-only signals cannot add value.
+ *      NOT consulted for platform tenants — see the tenant note in evaluate().
  *
  *   B. Suffix trust (tld-rates.ts)                  - feeds a feature
  *      Drives TLDLegitimateProb inside feature-extractor.ts (not owned here).
@@ -32,6 +33,11 @@
  *      only separable by reputation (trusted infra vs deploy-anywhere platforms),
  *      not by the model — the model cannot tell 'apple-relay.cloudflare.com' from
  *      'microsoft-verify-login.netlify.app'.
+ *
+ *      The guard's bare-brand-label exemption is limited to
+ *      IDENTITY_BOUND_PLATFORMS (Aug 15, 2026). It was previously granted on every
+ *      platform, which handed it to any squatter who claimed a brand as a project
+ *      name: 'paypal.vercel.app' was CLEAN 0.232.
  *
  * The module returns verdict.code, the registrable domain (via the single domain
  * seam `parseHost`), a platform match, the possibly-corrected feature vector, and
@@ -62,7 +68,24 @@ export const PLATFORM_HOSTS: readonly string[] = [
   "static.app",
   "fly.dev",
   "railway.app",
+  "ondigitalocean.app",
 ];
+
+/**
+ * Platforms whose subdomain namespace is IDENTITY-BOUND: the label is tied to an
+ * account name that had to be claimed as an org/user, so `<brand>.<platform>` is
+ * the brand's own page rather than an impersonation.
+ *
+ * `microsoft.github.io` belongs to the Microsoft org; nobody else can hold it.
+ * That is NOT true of a deploy-anywhere platform — `paypal.vercel.app` is a
+ * project name, first-come-first-served, so a bare brand label there is exactly
+ * the squat the guard exists to catch. Keep this set small and only add a
+ * platform when holding the label demonstrably requires holding the identity.
+ */
+const IDENTITY_BOUND_PLATFORMS: ReadonlySet<string> = new Set([
+  "github.io",
+  "gitlab.io",
+]);
 
 export type ReputationKind = "allowlisted" | "platform" | "unknown";
 
@@ -119,8 +142,27 @@ export class Reputation {
       ? `${parts.domain}.${parts.suffix}`
       : parts.domain;
 
+    // Which platform hosts this URL, and is this a TENANT or the platform's own
+    // root? Resolved before the allowlist because the answer decides whether the
+    // allowlist may speak at all — see the note on adapter A below.
+    // Subdomains share the platform ("myapp.vercel.app"); the bare suffix is the
+    // console/root ("github.io" is itself a landable page).
+    const platform = PLATFORM_HOSTS.find(
+      (p) => host === p || host.endsWith("." + p)
+    );
+    const isTenant = !!platform && host !== platform;
+
     // Adapter A — hard allowlist of known-popular registrable domains.
-    if (this.allowlist?.has(registrableDomain)) {
+    //
+    // SKIPPED for platform tenants. The PSL trie is ICANN-only, so
+    // 'evil.railway.app' has registrable domain 'railway.app' — the PLATFORM,
+    // not the tenant. Several platforms are popular enough to sit in the top-30k
+    // list (railway.app, neocities.org), so consulting the allowlist here cleared
+    // every tenant under them to CLEAN 0.05 before the model or the brand guard
+    // ever ran. A tenant is not its platform: the allowlist identifies a site,
+    // and 'railway.app' being a real site says nothing about who deployed
+    // 'microsoft-verify-login.railway.app'.
+    if (!isTenant && this.allowlist?.has(registrableDomain)) {
       return {
         kind: "allowlisted",
         registrableDomain,
@@ -138,21 +180,22 @@ export class Reputation {
     }
 
     // Adapter C — hosting platform. Advisory: neutralise TLD trust only.
-    // Subdomains share the platform ("myapp.vercel.app"), the bare suffix is the
-    // console/root ("github.io" is itself a landable page).
-    const platform = PLATFORM_HOSTS.find(
-      (p) => host === p || host.endsWith("." + p)
-    );
     if (platform) {
       // Brand-impersonation guard: if the subdomain claims to be a brand, the
       // advisory correction is withheld. The TLD neutralisation removes the
       // model's #1 phishing signal (low-trust TLD) — exactly the reason a clone
       // like 'microsoft-verify-login.netlify.app' would otherwise drop to CLEAN.
       // A platform correction may soften a page on every signal BUT brand
-      // impersonation. Mirrors hard-red immunity (CONTEXT.md). The subdomain IS
-      // the whole label (microsoft.github.io — the org's own project page) is
-      // legitimate and passes through the normal correction.
-      const impersonation = brandTokenInSubdomain(parts.subdomain || "");
+      // impersonation. Mirrors hard-red immunity (CONTEXT.md).
+      //
+      // The bare-brand-label exemption ('microsoft.github.io' — the org's own
+      // project page) applies ONLY on identity-bound platforms, where holding the
+      // label required holding the identity. On a deploy-anywhere platform
+      // 'paypal.vercel.app' is a claimable project name, so it stays guarded.
+      const impersonation = brandTokenInSubdomain(
+        parts.subdomain || "",
+        IDENTITY_BOUND_PLATFORMS.has(platform)
+      );
       if (impersonation) {
         return {
           kind: "platform",

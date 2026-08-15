@@ -4,7 +4,113 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 15, 2026 (latest) — Committed the brand-impersonation guard, reviewed it, and found 7 defects
+## August 15, 2026 (latest) — Closed three holes in the brand guard; found training is not reproducible
+
+Follow-up to the review entry below. All seven findings are now fixed, the extension is
+rebuilt, and two new defects surfaced while measuring.
+
+### The three verdict-level fixes
+
+1. **The hard allowlist was clearing platform tenants.** `psl-trie.ts` is ICANN-only,
+   so `parseHost('evil.railway.app')` returns registrable domain `railway.app` — the
+   *platform*. `railway.app` and `neocities.org` are both in the top-30k allowlist, so
+   adapter A fired first and returned CLEAN 0.05 before the model or the guard ran.
+   Fixed in [`reputation.ts`](phishing-extension/src/ml/reputation.ts): the platform
+   match is now resolved *before* the allowlist, and adapter A is skipped when the host
+   is a **tenant** (`host !== platform && host.endsWith('.' + platform)`). Renting space
+   in a well-known building does not make you the landlord.
+   `microsoft-verify-login.railway.app`: CLEAN 0.05 → **SUSPICIOUS 0.837**.
+2. **The bare-brand-label exemption was granted on every platform.** It is sound for
+   `microsoft.github.io` — GitHub's `<name>.github.io` requires owning the `name` org —
+   but it was handing the same pass to anyone who claimed a brand as a project name.
+   Now limited to `IDENTITY_BOUND_PLATFORMS` (`github.io`, `gitlab.io`);
+   `brandTokenInSubdomain` takes an explicit `allowBareBrandLabel` flag so the
+   reputation module owns that judgement and `brands.ts` only knows brands.
+   `paypal.vercel.app`: CLEAN 0.232 → **SUSPICIOUS 0.866**. `microsoft.github.io`
+   stays CLEAN 0.221.
+3. **The typo threshold was exclusive on one side only.** `brandTokenInSubdomain` used
+   `sim > 0.6` while Python and `brandSimilarityOf` use `< 0.6 → 0`. A single adjacent
+   transposition of a 5-letter brand lands on *exactly* 0.6, so `paple` (← `apple`)
+   slipped the guard while `payapl` (0.667) was caught. Now `>=`.
+   `paple-login.vercel.app`: CLEAN 0.253 → **SUSPICIOUS 0.821**.
+
+Also added `ondigitalocean.app` to `PLATFORM_HOSTS` — it was in the allowlist, so every
+tenant under it was being hard-cleared.
+
+### The four housekeeping fixes
+
+4. Removed the local `TYPO_THRESHOLD = 0.6` at `feature-extractor.ts:79` that shadowed
+   the import from `brands.ts`, defeating the point of that module.
+5. Deleted the dead `brandSimilarityOf` export.
+6. `demo_supervisor.mjs` printed `raw ML : undefined` for allowlisted URLs; now prints
+   `n/a (model skipped)`, and formats raw scores to 3dp.
+7. Corrected the inverted root-slash comments in both extractors (see the entry below
+   for the measurement).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| Parity gate (bundle rebuilt first) | **0 mismatches / 20,160 values** |
+| `pnpm build` + `postbuild` | clean, 3/3 assets copied |
+| Shipped model md5 | `c39d40f…` unchanged (806,620 nodes) |
+| Previously-cleared attack URLs | **6 of 8 now flagged** (was 0 of 8) |
+| 10 legit platform tenants | all CLEAN, 0.181–0.299 — **no regression** |
+| Reported unknown-legit FPR | unchanged |
+
+The FPR is unchanged because `validate_unknown_legit.py` builds only bare domains
+(`build_curated`, `build_sampled`) and does not model the platform adapter at all — so
+these fixes cannot move it. The legit-tenant probe was run separately for that reason,
+and it is the measurement that matters here: the tenants that previously depended on
+the allowlist (`myapp.railway.app`, `retro-fanpage.neocities.org`) score 0.216 and
+0.234 through the model, well under the 0.50 cut. The platform correction covers them
+without the allowlist.
+
+### Two new defects found while measuring
+
+**Training is not reproducible.** Timing a retrain (to answer "how long does this
+take?" — **5 min 9 s** including 5-fold CV) produced a *third* distinct forest:
+
+| Artifact | Total nodes |
+|---|---|
+| Shipped `assets/phishing_model.json` | 806,620 |
+| `random_forest.pkl` as of Aug 14 | 846,454 |
+| Re-run Aug 15, same code and seeds | 864,614 |
+
+In-corpus metrics are stable to ~0.02 pt (90.64% / FPR 6.62%), so this is structural
+drift, not a different model class. `SOURCE_OF_TRUTH.md` §3's claim of byte-identical
+reproducibility is now marked **superseded**. Prime suspect is an unseeded RNG or
+`set`/`dict` iteration order in the corpus builder — Python randomises string hashing
+per process unless `PYTHONHASHSEED` is pinned. **This blocks any corpus experiment
+aimed at the FPR**, because an improvement cannot be separated from run-to-run noise.
+
+**The headline FPR measures a model that isn't shipped.**
+`validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension loads
+`assets/phishing_model.json`. Different forests. Every unknown-legit FPR figure in the
+docs therefore describes a model nobody runs — the same trap already flagged for
+`test_url.py`, unnoticed on the project's primary acceptance metric. The same harness
+also uses `PHISH_MIN = 0.85` against a shipped red band of 0.90, and builds URLs with
+no root slash. All three are logged in `handoff.md` §3 B.
+
+### Incidental confirmations from the retrain's feature importances
+
+- **`DomainLength` is the #2 feature** (0.1238), behind only `TLDLegitimateProb`
+  (0.2967). The FPR diagnosis is confirmed by the model's own importances.
+- **`URLSimilarityIndex` is inert** (0.0036, last of 21). The model contributes almost
+  nothing to brand-impersonation detection; the reputation layer does that work. This
+  is evidence *for* the architecture and explains why the extractor-side experiment
+  failed.
+
+Docs updated: `CONTEXT.md` (tenant, identity-bound platform, "withholding is not
+accusing"), `SOURCE_OF_TRUTH.md` (§3 reproducibility superseded, §3a provenance
+warning, §8 guard-hardening record), `SUPERVISOR_DEMO.md` (12-row verified table,
+FPR provenance column, revised follow-ups), plus `handoff.md`, `memory.md` and
+`architecture.md`.
+
+---
+
+## August 15, 2026 — Committed the brand-impersonation guard, reviewed it, and found 7 defects
 
 **What landed.** The reputation refactor + brand-impersonation guard (authored in the
 Aug 14 session, previously uncommitted) is now committed as `eb3e2b3`, with

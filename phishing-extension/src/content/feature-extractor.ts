@@ -76,7 +76,9 @@ function computeBrandSimilarity(domainSld: string, url: string): number {
   // Only HIGH similarity counts as typosquatting (e.g. paypa1~paypal, g00gle~google).
   // Coincidental moderate distance (github~google ≈ 0.33) is NOT typosquatting and
   // must score 0, or legitimate non-brand domains get flagged. Matches Python.
-  const TYPO_THRESHOLD = 0.6;
+  // TYPO_THRESHOLD is imported from ../ml/brands — do not redeclare it here; a
+  // local copy silently shadowed the shared constant and defeated the whole point
+  // of that module.
   let domainMaxSim = 0.0;
   for (const brand of BRANDS) {
     if (domainSld === brand) {
@@ -172,10 +174,14 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
   // Strip a lone ROOT trailing slash ('https://x.com/' -> 'https://x.com').
   //
   // This is the browser-facing half of the bug: window.location.href always
-  // reports a homepage slash-terminated, but the training corpus has '/' on
-  // 31.4% of legitimate rows and 0.0% of phishing rows, and build_legit_urls()
-  // never emits a bare slash — so '/' had become a label token and every real
-  // homepage landed on the wrong side of it.
+  // reports a homepage slash-terminated, and in the training corpus the root
+  // slash is a PHISHING-class token — measured on datasets/phiusiil.csv, 31.45%
+  // of phishing rows (31,744 / 100,945, label==0) end in a bare root slash
+  // against 0.00% of legitimate rows (0 / 134,850, label==1) — while
+  // build_legit_urls() never emits a bare slash either. So '/' pointed at
+  // phishing, and every real homepage landed on the wrong side of it.
+  // (Corrected Aug 15, 2026: this comment previously had the two classes
+  // swapped, which made the measurement below impossible to explain.)
   //
   // Measured on the shipped model, n=1,500 unknown-legit homepages:
   //   bare  https://d   ->  12.6% flagged (mean 0.256)
