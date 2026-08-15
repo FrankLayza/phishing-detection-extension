@@ -4,7 +4,86 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 15, 2026 (latest) — Closed three holes in the brand guard; verified training reproducibility
+## August 15, 2026 (latest) — The FPR harness now measures the model that ships
+
+`validate_unknown_legit.py` — the script that produces the project's primary acceptance
+metric — loaded `models/random_forest.pkl`, i.e. whatever `train.py` last produced
+(864,614 nodes), rather than the committed `assets/phishing_model.json` (806,620 nodes)
+that the extension actually loads. Same trap already documented for `test_url.py`,
+unnoticed on the headline metric.
+
+### What changed
+
+- **New `ShippedModel` class** walks the committed browser JSON directly, mirroring
+  `rf-inference.ts`: `val * scale + min` scaling, `<=` goes left, soft-vote sum of
+  per-tree class fractions over `n_estimators`. It is now the default scoring path and
+  prints the artifact path and node count in every report.
+- **`--model pkl` retains the old path** and prints a warning. This is not vestigial: the
+  corpus experiment needs to measure a fresh retrain *before* deciding whether to export
+  it, so both targets are genuinely required.
+- **`PHISH_MIN` 0.85 → 0.90** to match `verdictFor()` in `popup.tsx`. The harness had been
+  reporting hard red alarms at a band the product does not use.
+- Fixed the existing harness rather than adding a parallel one. This repo already carries
+  drifted duplicates (`diagnose_url.mjs`, `test_url.py`), and a second FPR script would
+  have become the third.
+
+### Verification of the new scorer
+
+Cross-checked against the JS traversal in `demo_supervisor.mjs` on four URLs spanning the
+score range — **exact match on all four**, and the loader reports 806,620 nodes:
+
+| URL | Python (new) | JS (`demo_supervisor.mjs`) |
+|---|---|---|
+| `gtbank.com` | 0.199 | 0.199 |
+| `microsoft-verify-login.phishcorp.co` | 0.596 | 0.596 |
+| `my-portfolio.vercel.app` (raw) | 0.838 | 0.838 |
+| `paypal.vercel.app` (raw) | 0.866 | 0.866 |
+
+### The measurement, on the shipped artifact
+
+| Set | n | ML-tier FPR | Pipeline FPR | Hard red (>=0.90) |
+|---|---|---|---|---|
+| Curated regional | 144 | 21.5% | 16.7% | 0.7% |
+| Sampled top-1m rank >=120k | 4,000 | **15.4%** | **9.4%** | **0.8%** |
+
+For comparison, the current retrain (864,614 nodes) scores curated 22.2% / 17.4% / 0.7%
+and sampled 16.5% / 10.2% / 1.0% — about a point worse throughout, consistent with the
+standing decision to keep the committed model.
+
+**The published figures were correct.** `SOURCE_OF_TRUTH.md` §3a already listed 21.5% /
+16.7% / 0.7% and 15.4% / 0.8%, and the shipped model reproduces all of them (the sampled
+pipeline figure was recorded as 9.5%; measured 9.4%). So the drift was forward-looking: it
+would have corrupted the *next* measurement, not the existing ones. An earlier note in
+this file said these figures "describe a model nobody runs" — that was an over-claim and is
+corrected here.
+
+### Two sub-items resolved differently than expected
+
+- **The missing root slash needed no fix.** The harness builds `https://domain` while the
+  browser sends `https://domain/`, which was once worth +26 points of FPR. Verified that
+  the two now produce **byte-identical** feature vectors, because `38e820d` strips a lone
+  root slash in both extractors. Documented in the harness so it is not re-opened. Path
+  URLs must NOT gain a trailing slash — there it is real path structure.
+- **The population does contain platform tenants.** A guard was added asserting there were
+  none, on the reasoning that both populations are bare registrable domains; it
+  immediately found 5 of 4,000 (0.12%) — `v0-panagram-sorted-puff.vercel.app`,
+  `liveperson-pmi.github.io`, `sce-cdd-prod-admin-portal.azurewebsites.net` and two more.
+  The assumption was wrong and the guard is what caught it. It now counts and prints them,
+  bounding the error at ~0.13 pt, and reads `PLATFORM_HOSTS` straight out of
+  `reputation.ts` so the two cannot drift. It deliberately does **not** reimplement the
+  reputation module — tenants should be scored through `demo_supervisor.mjs`.
+
+Docs updated: `SOURCE_OF_TRUTH.md` §3a, `SUPERVISOR_DEMO.md` key numbers,
+`handoff.md` (§3 B closed, §3 C promoted), `memory.md` §1 item 5, `architecture.md`
+invariant 9.
+
+**Next:** §3 C — distribution-match domain length and suffix shape in the legitimate
+class. Retrains are ~5 min and reproducible, and each arm can now be measured with
+`--model pkl` before anything is exported.
+
+---
+
+## August 15, 2026 — Closed three holes in the brand guard; verified training reproducibility
 
 Follow-up to the review entry below. All seven findings are now fixed, the extension is
 rebuilt, and one new defect surfaced while measuring (plus one false alarm, retracted

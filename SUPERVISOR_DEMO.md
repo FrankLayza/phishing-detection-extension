@@ -113,18 +113,19 @@ Expected output:
 | Precision / Recall / F1 | 93.28% / 88.80% / 90.98% | committed model |
 | In-corpus False Positive Rate | 5.87% | committed model |
 | 5-fold CV | 91.43% | committed model |
-| Unknown-legit ML-tier FPR (sampled top-1m, n=4000) | ~15–16% | ⚠️ `random_forest.pkl`, **not** the shipped model |
-| Unknown-legit pipeline FPR (what users experience) | ~9.9% | ⚠️ same caveat |
-| Unknown-legit **hard red alarms** | 0.7–0.8% | ⚠️ same caveat |
+| Unknown-legit ML-tier FPR (sampled top-1m, n=4000) | **15.4%** | shipped model |
+| Unknown-legit pipeline FPR (what users experience) | **9.4%** | shipped model |
+| Unknown-legit **hard red alarms** (>= 0.90) | **0.8%** | shipped model |
+| Unknown-legit ML-tier FPR (curated regional, n=144) | 21.5% | shipped model |
 | Model size | 19.6 MiB browser bundle | — |
 
-> ⚠️ **Be precise about the FPR provenance if asked.** `validate_unknown_legit.py:83`
-> loads `models/random_forest.pkl` (864,614 nodes), while the
-> extension loads `assets/phishing_model.json` (806,620 nodes). They are different
-> forests, so the unknown-legit FPR figures describe a model that is not shipped.
-> Re-measuring those populations through `demo_supervisor.mjs` (which uses the
-> committed model and the real TS extractor) is a known follow-up. The in-corpus
-> figures above are the committed model's own.
+> **All FPR figures are measured on the artifact the extension loads.**
+> `validate_unknown_legit.py` defaults to `assets/phishing_model.json` (806,620 nodes)
+> as of Aug 15, 2026; it previously read `models/random_forest.pkl`, which is whatever
+> `train.py` last produced. If asked, the honest framing is that the published numbers
+> were correct but the harness had drifted, so it was re-pointed and re-verified. Pass
+> `--model pkl` to score a retrain instead — the current one is about a point worse
+> (sampled 16.5% ML / 10.2% pipeline), which is why the committed model is kept.
 
 Verdict bands (calibrated): **CLEAN < 0.50** · **SUSPICIOUS 0.50–0.90** ·
 **PHISHING ≥ 0.90**. Only PHISHING is a blocking, alarming verdict.

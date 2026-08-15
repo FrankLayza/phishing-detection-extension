@@ -105,13 +105,23 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 
 ### 3a. Unknown-legitimate FPR — the metric that actually gates the product
 
-> **⚠ Provenance warning (Aug 15, 2026).** `validate_unknown_legit.py:83` loads
-> `models/random_forest.pkl`, **not** the shipped `assets/phishing_model.json`. Those
-> are different forests (864,614 vs 806,620 nodes). Every unknown-legit FPR figure in
-> this section therefore describes a model the extension does not load. Re-measuring
-> these populations through the shipped artifact (as `demo_supervisor.mjs` already does
-> for single URLs) is an open follow-up. Same trap family as `test_url.py`, which is
-> already flagged for loading the divergent pkl.
+> **Scored on the shipped artifact since Aug 15, 2026.** `validate_unknown_legit.py`
+> now defaults to `phishing-extension/assets/phishing_model.json` — the 806,620-node
+> forest the extension loads — instead of `models/random_forest.pkl`, which is whatever
+> `train.py` last produced. Pass `--model pkl` to score a fresh retrain before deciding
+> to export it; that path prints a warning and must not be quoted as the product metric.
+> The Python scorer was cross-checked against the JS traversal in `demo_supervisor.mjs`
+> on four URLs spanning the score range (0.199 / 0.596 / 0.838 / 0.866 — exact match).
+>
+> **The table below was re-measured on the shipped model and reproduces.** The drift was
+> forward-looking rather than retrospective: the published figures were right, but the
+> harness as it stood would have reported the .pkl's numbers for the next measurement.
+> For reference, the current retrain (864,614 nodes) scores curated 22.2% / 17.4% / 0.7%
+> and sampled 16.5% / 10.2% / 1.0% — about a point worse across the board, consistent
+> with §3's note that the committed model is the better artifact.
+>
+> `PHISH_MIN` in that harness was also 0.85 while the shipped red band is 0.90, so hard
+> alarms were over-reported; corrected, and the 0.8% below is at 0.90.
 
 Held-out accuracy measures the corpus, not the goal. The legitimate class is partly
 synthesized, so in-corpus accuracy stays high while genuinely unseen legitimate sites
@@ -120,7 +130,17 @@ fail. Measured by `validate_unknown_legit.py` → `models/unknown_legit_validati
 | Set | n | ML-tier FPR | Full-pipeline FPR | Hard red alarms |
 |---|---|---|---|---|
 | Curated regional (banks, fintech, SMB) | 144 | 21.5% | 16.7% | **0.7%** |
-| Sampled top-1m, rank ≥120k | 4,000 | **15.4%** | 9.5% | **0.8%** |
+| Sampled top-1m, rank ≥120k | 4,000 | **15.4%** | 9.4% | **0.8%** |
+
+> Re-verified Aug 15, 2026 against the shipped model. (The sampled pipeline figure was
+> previously recorded as 9.5%; the measured value is 9.4%.)
+>
+> One approximation to know about: 5 of the 4,000 sampled URLs (0.12%) are hosting-platform
+> tenants (`v0-panagram-sorted-puff.vercel.app`, `liveperson-pmi.github.io`, …). The
+> harness models adapter A only, so for those five it does not apply the tenant rule or
+> the advisory TLD correction. The harness now counts and prints them, bounding the error
+> at ~0.13 pt. It deliberately does **not** reimplement `reputation.ts` — score tenants
+> through `demo_supervisor.mjs` if they ever matter.
 
 > Measured Aug 9, 2026 (later session) on the query/digit-leak-fix model. The measured
 > pre-change baseline was **20.8%** on both populations. Cite the **sampled** row as the

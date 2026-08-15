@@ -24,8 +24,9 @@ All seven review findings are **fixed and verified**. The extension has been reb
 | 10 legit platform tenants | all CLEAN 0.181–0.299, no regression |
 | Reported unknown-legit FPR | unchanged (harness doesn't model the platform adapter) |
 
-**Step 0 is complete:** training reproducibility was tested and holds (§3 A), so the
-corpus experiment on the FPR is unblocked.
+**Steps 0 and B are complete.** Training reproducibility was tested and holds (§3 A),
+and the FPR harness now scores the shipped artifact (§3 B). The corpus experiment on the
+FPR (§3 C) is unblocked and is the next substantive piece of work.
 
 ## 1. What landed
 
@@ -60,7 +61,7 @@ its tenants were being hard-cleared).
 
 ## 3. Open work queue
 
-Ranked. Item A was investigated and cleared; B is now the top item.
+Ranked. A was investigated and cleared, B is done; **C is now the top item**.
 
 ### A — RESOLVED: training IS reproducible (was flagged as a blocker)
 
@@ -93,24 +94,42 @@ python ml-pipeline/train.py
 python -c "import joblib; rf=joblib.load('models/random_forest.pkl'); print(sum(t.tree_.node_count for t in rf.estimators_))"
 ```
 
-### B — the headline FPR is measured on a model that isn't shipped
+### B — DONE: the FPR harness now scores the shipped artifact
 
-`validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension loads
-`assets/phishing_model.json`. Different forests (864,614 vs 806,620 nodes). So the
-~15–16% ML-tier and ~9.9% pipeline figures describe a model nobody runs.
+`validate_unknown_legit.py` defaulted to `models/random_forest.pkl` (whatever `train.py`
+last produced, 864,614 nodes) rather than the committed `assets/phishing_model.json`
+(806,620). Fixed by adding a `ShippedModel` scorer that walks the committed JSON with the
+same scaling and traversal as `rf-inference.ts`; `--model pkl` keeps the old path for
+measuring a retrain before exporting it, and prints a warning.
 
-Same trap family as `test_url.py`, which is already flagged for this. Fix: score the
-curated and sampled populations through the shipped artifact — `demo_supervisor.mjs`
-already does exactly this for single URLs (bundled TS extractor + committed model JSON
-+ real reputation logic), so it mostly needs the population loops lifted from
-`validate_unknown_legit.py`.
+The Python traversal was cross-checked against the JS one in `demo_supervisor.mjs` on
+four URLs spanning the range (0.199 / 0.596 / 0.838 / 0.866) — exact match — and the
+loader reports 806,620 nodes, confirming it read the shipped forest.
 
-Two smaller defects in the same harness, worth fixing while there:
-- `PHISH_MIN = 0.85`, but the shipped red band is **0.90**. It over-reports hard alarms.
-- It builds `https://domain` with no root slash, so it scores a URL shape the browser
-  never sends. See `memory.md` §2.
+**Measured on the shipped model:**
 
-### C — the FPR gap itself (do B first)
+| Set | n | ML FPR | Pipeline FPR | Hard red |
+|---|---|---|---|---|
+| curated | 144 | 21.5% | 16.7% | 0.7% |
+| sampled | 4,000 | **15.4%** | **9.4%** | **0.8%** |
+
+The published figures were therefore correct — the drift would have corrupted the *next*
+measurement, not the existing ones. The retrain scores about a point worse (sampled 16.5%
+/ 10.2%), consistent with keeping the committed model.
+
+Also fixed here: `PHISH_MIN` was 0.85 against a shipped red band of 0.90, over-reporting
+hard alarms; now 0.90, and the 0.8% above is at that band.
+
+**The root-slash sub-item needed no fix** — verified that `https://d` and `https://d/`
+now yield byte-identical features, because `38e820d` strips a lone root slash in both
+extractors. Documented in the harness so it is not re-opened. Do not append slashes to
+path URLs: there a trailing slash is real path structure.
+
+Residual approximation: 5 of 4,000 sampled URLs (0.12%) are platform tenants, where the
+harness models adapter A only. It counts and prints them, bounding the error at ~0.13 pt,
+and deliberately does not reimplement `reputation.ts`.
+
+### C — the FPR gap itself (now the top item)
 
 ML-tier FPR ~16% against a <10% target. Root cause diagnosed: `DomainLength` is the
 model's **#2 feature** (0.1238 importance) and encodes suffix structure as risk, so
@@ -157,12 +176,13 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
 ## 4. Suggested next steps
 
 1. ~~Fix training determinism~~ — **done**, it was never broken (§3 A).
-2. **Re-point the FPR harness at the shipped model** (§3 item B), and fix its
-   `PHISH_MIN` band and missing root slash while you're in there. After this you can
-   answer "what is your false positive rate?" defensibly. This is now the top item.
-3. **Then the corpus experiment** (§3 item C) — distribution-match domain length and
-   suffix shape in the legitimate class. Retrains are ~5 min and reproducible, so
-   before/after comparisons are directly interpretable.
+2. ~~Re-point the FPR harness at the shipped model~~ — **done** (§3 B). "What is your
+   false positive rate?" now has a defensible answer: 15.4% ML-tier / 9.4% pipeline on
+   n=4,000, measured on the forest the extension loads.
+3. **The corpus experiment** (§3 item C) — distribution-match domain length and suffix
+   shape in the legitimate class. This is now the top item. Retrains are ~5 min and
+   reproducible, so before/after comparisons are directly interpretable; measure each
+   arm with `validate_unknown_legit.py --model pkl` before exporting anything.
 5. If a retrain is adopted: re-export via `export_model_json.py`, regenerate
    `shap_mapping.json`, **re-calibrate the 0.50/0.90 bands** (`sweep_thresholds.py` —
    they were tuned to the old model's score distribution), re-measure, update

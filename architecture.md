@@ -132,8 +132,8 @@ Feature list: see `src/types/index.ts` (`FeatureVector`).
 
 ## 5. Invariants
 
-Break one of these and the product is silently wrong. Items 4 and 9 are currently
-**violated** and tracked in `handoff.md` §3.
+Break one of these and the product is silently wrong. Item 4 is currently a known,
+deliberate exception, tracked in `handoff.md` §3.
 
 1. **Train/serve parity.** `check_parity.py` must report 0 mismatches across
    20,160 values (960 URLs × 21). Run it after *any* extractor edit.
@@ -154,9 +154,10 @@ Break one of these and the product is silently wrong. Items 4 and 9 are currentl
    the popup, plus `tabs.onUpdated` eviction.
 8. **Browser URL shape ≠ corpus URL shape.** Chrome sends `https://d/`; the
    corpus holds `https://d`. That trailing slash was worth +26 points of FPR.
-9. **Measure the artifact that ships.** `validate_unknown_legit.py` currently loads
-   `random_forest.pkl` (864,614 nodes), not the shipped JSON (806,620), so its FPR
-   figures describe a different model. (`handoff.md` §3 B.)
+9. **Measure the artifact that ships.** `validate_unknown_legit.py` scores the
+   committed JSON by default as of Aug 15, 2026; `--model pkl` scores a retrain and says
+   so. Its Python traversal is cross-checked against `rf-inference.ts` via
+   `demo_supervisor.mjs`. (`handoff.md` §3 B.)
 
 ## 6. The reputation layer
 

@@ -43,16 +43,27 @@ the icon. Several bugs were only ever caught that way.
    click-through spot-check from before Aug 10, 2026 proved nothing, because it
    could not distinguish a fresh verdict from a stale one.
 
-### …make that five ⚠️
+### …make that five 🔒
 
-5. **The headline FPR measures a model that isn't shipped.** Discovered Aug 15, 2026.
-   `validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension
-   loads `assets/phishing_model.json`. Different forests — 864,614 nodes versus
-   806,620. Every unknown-legit FPR figure in the docs therefore describes a model
-   nobody runs. Exactly the same trap as `test_url.py`, which was already flagged for
-   it; nobody noticed it also applied to the project's primary acceptance metric.
-   The same harness also uses `PHISH_MIN = 0.85` against a shipped red band of 0.90,
-   and builds URLs with no root slash — so it is wrong on three axes at once.
+5. **The FPR harness scored a model that isn't shipped.** Found and fixed Aug 15, 2026.
+   `validate_unknown_legit.py` loaded `models/random_forest.pkl` (whatever `train.py`
+   last produced, 864,614 nodes) rather than `assets/phishing_model.json` (806,620) —
+   the same trap already flagged for `test_url.py`, unnoticed on the project's primary
+   acceptance metric. It now scores the committed JSON by default, with `--model pkl`
+   for measuring a retrain pre-export.
+
+   **Instructive detail: the published numbers turned out to be correct.** Re-measuring
+   on the shipped model reproduced the documented 21.5% / 16.7% / 0.7% and 15.4% / 0.8%
+   exactly. The drift was *forward-looking* — it would have corrupted the next
+   measurement, not the existing ones. So the lesson is not "the docs were lying" but
+   "a harness can point at the wrong artifact for a while and still look right, until
+   the two artifacts diverge enough to notice." Check what a harness loads, not just
+   whether its output matches the docs.
+
+   Two sub-items: `PHISH_MIN` was 0.85 against a shipped red band of 0.90 (fixed), and
+   the missing root slash **needed no fix** — `38e820d` strips a lone root slash in both
+   extractors, so `https://d` and `https://d/` now give byte-identical features
+   (verified). Do not append slashes to path URLs; there the slash is real structure.
 
 ## 1a. Reproducibility: verified, and a cautionary tale ✅
 
@@ -122,10 +133,11 @@ in-corpus accuracy sits ~91–93% while real unknown sites get flagged. Measure 
 `validate_unknown_legit.py` (curated n=144, sampled n=4,000 — cite the sampled
 figure, it has the statistical power).
 
-Acceptance target: ML-tier FPR <10% on both populations, recall >90%. Currently
-~16% sampled ML-tier / ~9.9% pipeline — **still above target**, and note both figures
-come from the harness described in §1 item 5, i.e. measured on `random_forest.pkl`
-rather than the shipped model.
+Acceptance target: ML-tier FPR <10% on both populations, recall >90%. Measured on the
+**shipped** model (Aug 15, 2026): sampled n=4,000 gives **15.4% ML-tier / 9.4%
+pipeline / 0.8% hard red**; curated n=144 gives 21.5% / 16.7% / 0.7%. Cite the sampled
+row — n=144 has no statistical power and is 100/144 `.com`, so it moves on composition.
+**Still above the ML-tier target.**
 
 **The allowlist cannot solve this. Do not retry that path.** Regional sites sit far
 below any practical cut: `jumia.com.ng` rank 210k, `gtbank.com` 380k,
@@ -190,13 +202,25 @@ only 8/18 curated sites. Unknown-legit accuracy must come from the ML tier.
 ## 6. The committed model is authoritative ⚠️
 
 `assets/phishing_model.json` (~19.6 MiB, 20,586,218 bytes) does **not** byte-reproduce
-from current code. A retrain yields a different forest (846,454 nodes vs the
-committed 806,620) and ~0.8 pt worse FPR (90.65% / 6.64% vs the documented 91.58% /
-5.87%), because the root-slash strip landed after the model was trained (§2).
+from current code. A retrain yields a different forest (**864,614** nodes vs the
+committed 806,620) and worse numbers on every axis, because the root-slash strip landed
+after the model was trained (§2):
+
+| | Committed (shipped) | Current retrain |
+|---|---|---|
+| Nodes | 806,620 | 864,614 |
+| Held-out accuracy | 91.58% | 90.64% |
+| In-corpus FPR | 5.87% | 6.62% |
+| Unknown-legit sampled ML FPR | **15.4%** | 16.5% |
+| Unknown-legit sampled pipeline FPR | **9.4%** | 10.2% |
 
 **Never silently replace it.** Any retrain is a reviewed decision and must be
 re-exported explicitly via `export_model_json.py`. Verified Aug 15: the file in
 `assets/` is md5-identical to the one in `build/chrome-mv3-prod/assets/`.
+
+Measure any candidate retrain with `validate_unknown_legit.py --model pkl` **before**
+exporting — the default path scores the committed JSON, so it would not see your retrain
+at all.
 
 ## 7. Performance: cold start, not inference ⚠️
 
