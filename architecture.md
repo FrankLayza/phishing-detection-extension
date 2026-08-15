@@ -132,7 +132,7 @@ Feature list: see `src/types/index.ts` (`FeatureVector`).
 
 ## 5. Invariants
 
-Break one of these and the product is silently wrong. Items 4, 5 and 9 are currently
+Break one of these and the product is silently wrong. Items 4 and 9 are currently
 **violated** and tracked in `handoff.md` §3.
 
 1. **Train/serve parity.** `check_parity.py` must report 0 mismatches across
@@ -145,9 +145,9 @@ Break one of these and the product is silently wrong. Items 4, 5 and 9 are curre
 4. **The committed model is authoritative.** `assets/phishing_model.json` does
    *not* byte-reproduce from current code; a retrain yields a different forest and
    ~0.8pt worse FPR. Never silently replace it. (`SOURCE_OF_TRUTH.md` §3.)
-5. **Training is currently non-deterministic** — three seeded runs gave 806,620 /
-   846,454 / 864,614 nodes. Until fixed, no before/after model comparison is valid.
-   (`handoff.md` §3 A.)
+5. **Training is reproducible per environment** — two consecutive runs gave identical
+   forests (864,614 nodes). Pin interpreter and library versions when comparing runs;
+   re-baseline after any dependency change. (`handoff.md` §3 A.)
 6. **Reputation may soften, never alarm.** Only the allowlist is hard authority.
    The platform adapter can lower a score, never raise one.
 7. **A verdict must never outlive its page.** Two layers: URL equality check in
@@ -155,8 +155,8 @@ Break one of these and the product is silently wrong. Items 4, 5 and 9 are curre
 8. **Browser URL shape ≠ corpus URL shape.** Chrome sends `https://d/`; the
    corpus holds `https://d`. That trailing slash was worth +26 points of FPR.
 9. **Measure the artifact that ships.** `validate_unknown_legit.py` currently loads
-   `random_forest.pkl`, not the shipped JSON, so its FPR figures describe a different
-   model. (`handoff.md` §3 B.)
+   `random_forest.pkl` (864,614 nodes), not the shipped JSON (806,620), so its FPR
+   figures describe a different model. (`handoff.md` §3 B.)
 
 ## 6. The reputation layer
 

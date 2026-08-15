@@ -119,7 +119,7 @@ Expected output:
 | Model size | 19.6 MiB browser bundle | — |
 
 > ⚠️ **Be precise about the FPR provenance if asked.** `validate_unknown_legit.py:83`
-> loads `models/random_forest.pkl` (846k–865k nodes depending on the run), while the
+> loads `models/random_forest.pkl` (864,614 nodes), while the
 > extension loads `assets/phishing_model.json` (806,620 nodes). They are different
 > forests, so the unknown-legit FPR figures describe a model that is not shipped.
 > Re-measuring those populations through `demo_supervisor.mjs` (which uses the
@@ -136,11 +136,11 @@ Verdict bands (calibrated): **CLEAN < 0.50** · **SUSPICIOUS 0.50–0.90** ·
   encodes suffix structure as risk, so mechanically longer regional domains
   (`gtbank.com.ng`) are penalised. Removing the length features was tested and
   nearly doubled FPR (18.1% → 34.7%), so the fix is corpus-level, not feature-level.
-- **Training is not currently reproducible.** Three seeded runs of `train.py`
-  produced three different forests (806,620 / 846,454 / 864,614 nodes). In-corpus
-  metrics are stable to ~0.02 pt, but the claim of byte-identical reproducibility in
-  `SOURCE_OF_TRUTH.md` no longer holds. Must be fixed before any corpus experiment,
-  or an FPR change cannot be told apart from run-to-run noise.
+- **Training is reproducible** — verified Aug 15, 2026 by two consecutive runs of
+  `train.py` producing identical forests (864,614 nodes) and identical metrics
+  (90.64% / FPR 6.62% / CV 0.9038). A retrain takes ~5 min, so corpus experiments give
+  directly interpretable before/after comparisons. Determinism holds per environment;
+  pin library versions when comparing.
 - **Train/serve model drift documented:** a retrain on current code yields ~90.6% /
   FPR ~6.6% (not 91.58% / 5.87%) because the root-slash strip landed after the
   shipped model was trained. The committed model is authoritative and intentionally

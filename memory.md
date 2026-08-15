@@ -15,7 +15,7 @@ here so the failure mode isn't reintroduced.
 ## 0. The meta-lesson
 
 **Every validation surface in this repo has been green while the product was broken
-at least once.** Four separate times the harness measured something *adjacent* to
+at least once.** Five separate times the harness measured something *adjacent* to
 what ships. When you validate, ask what exactly is under test — the source or the
 build, the bundle or a stale copy, the corpus URL shape or the browser's.
 
@@ -47,33 +47,40 @@ the icon. Several bugs were only ever caught that way.
 
 5. **The headline FPR measures a model that isn't shipped.** Discovered Aug 15, 2026.
    `validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension
-   loads `assets/phishing_model.json`. Different forests — 846k–865k nodes versus
+   loads `assets/phishing_model.json`. Different forests — 864,614 nodes versus
    806,620. Every unknown-legit FPR figure in the docs therefore describes a model
    nobody runs. Exactly the same trap as `test_url.py`, which was already flagged for
    it; nobody noticed it also applied to the project's primary acceptance metric.
    The same harness also uses `PHISH_MIN = 0.85` against a shipped red band of 0.90,
    and builds URLs with no root slash — so it is wrong on three axes at once.
 
-## 1a. Training is not reproducible ⚠️
+## 1a. Reproducibility: verified, and a cautionary tale ✅
 
-Discovered Aug 15, 2026. Three seeded runs of `train.py` on unchanged code produced
-three different forests: **806,620** (shipped) / **846,454** / **864,614** nodes.
-In-corpus metrics are stable to ~0.02 pt, so it is structural drift rather than a
-different model class.
+**Training IS deterministic in a fixed environment.** Two consecutive runs of
+`train.py` on identical code produced identical forests (864,614 nodes) and identical
+metrics (90.64% accuracy, FPR 6.62%, 5-fold CV 0.9038 ± 0.0025). Environment: Python
+3.11.9, scikit-learn 1.3.0, numpy 1.24.3 — the repo `venv` and system Python carry the
+same versions, and both `tldextract` caches hold the same PSL snapshot.
 
-`SOURCE_OF_TRUTH.md` used to assert byte-identical reproducibility. That was true of
-the 691,570-node model it described and is false of the current pipeline; the claim is
-now marked superseded there.
+**The cautionary part, and the reason this entry exists.** Non-determinism was briefly
+*asserted* here on the strength of three differing node counts — 806,620 (shipped),
+846,454 (Aug 14), 864,614 (Aug 15) — and the docs were updated to say training was
+broken. The inference was wrong. Three counts from three unknown tree states are not
+evidence of randomness; the controlled test is **two runs on identical code**, which
+had not been done. Running it took five minutes and reversed the conclusion.
 
-**Prime suspect:** an unseeded RNG, or `set`/`dict` iteration order in the corpus
-builder — Python randomises string hashing per process unless `PYTHONHASHSEED` is
-pinned, so sampling from a `set` of domains picks a different subset every run.
+The lesson generalises past this repo: **differing artefacts prove the inputs differed,
+not that the process is random.** Identify what varied before blaming the process, and
+prefer one controlled comparison over three uncontrolled ones.
 
-**Why it matters more than it looks:** it silently invalidates before/after
-comparisons. Any corpus experiment aimed at the FPR is uninterpretable until this is
-fixed, because you cannot separate your intervention from run-to-run noise. Fix
-determinism, prove it with two identical runs, then measure the noise floor across
-2–3 deliberately different seeds before trusting any improvement.
+Residual unknown, recorded honestly: the Aug 14 figure of 846,454 cannot be reproduced
+from the committed tree — the only training-relevant change since is a comment — so it
+was most likely measured against uncommitted working-tree state. Cite **864,614** as
+the current retrain baseline. Determinism holds *per environment*, so pin interpreter
+and library versions when comparing runs and re-baseline after any dependency bump.
+
+Still true and unaffected: the *shipped* 806,620-node model does not reproduce from
+current code, because the root-slash strip landed after it was trained (§6).
 
 ## 2. The root slash — and a correction ✅
 
@@ -95,12 +102,13 @@ homepage — which is exactly why every homepage scored as phishing
 homepages flagged vs 12.6% bare). Fixed Aug 10 (`38e820d`) by stripping a lone root
 slash in both extractors rather than retraining.
 
-> ⚠️ **Two code comments state this backwards** — `feature-extractor.ts:176-177` and
-> `lexical_extractor.py:56-57` both say "legitimate rows are 31.4% root-slash while
-> phishing rows are 0.0%". That is inverted, and under the inverted premise the
-> observed symptom is impossible (a legit-leaning token cannot push homepages toward
-> phishing). The number in `SOURCE_OF_TRUTH.md` §3 is the correct one. See
-> `handoff.md` finding 7.
+> 🔒 **Two code comments used to state this backwards** — `feature-extractor.ts` and
+> `lexical_extractor.py:52-72` both claimed "legitimate rows are 31.4% root-slash while
+> phishing rows are 0.0%". Under that inverted premise the observed symptom is
+> impossible: a legit-leaning token cannot push homepages *toward* phishing. Both were
+> corrected in `69d7373` with the measurement inline. Kept here because the inversion
+> survived in code for five days while the correct number sat in
+> `SOURCE_OF_TRUTH.md` — a rationale nobody re-derives is a rationale that can rot.
 
 Consequence to keep in mind: because the strip changes 31.4% of *phishing* rows, it
 is **not** a training no-op — which is why the committed model no longer reproduces
@@ -115,7 +123,9 @@ in-corpus accuracy sits ~91–93% while real unknown sites get flagged. Measure 
 figure, it has the statistical power).
 
 Acceptance target: ML-tier FPR <10% on both populations, recall >90%. Currently
-15.4% sampled — **still above target**.
+~16% sampled ML-tier / ~9.9% pipeline — **still above target**, and note both figures
+come from the harness described in §1 item 5, i.e. measured on `random_forest.pkl`
+rather than the shipped model.
 
 **The allowlist cannot solve this. Do not retry that path.** Regional sites sit far
 below any practical cut: `jumia.com.ng` rank 210k, `gtbank.com` 380k,

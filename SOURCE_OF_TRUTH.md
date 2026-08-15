@@ -75,42 +75,43 @@ Held-out 20% test set (42,189 samples: 22,000 legit + 20,189 phish), from `model
 > retrain must be a reviewed decision (it changes FPR by ~0.8pt) and re-exported
 > via `export_model_json.py` explicitly.
 >
-> **⚠ SUPERSEDED (Aug 15, 2026): training is NOT currently reproducible.** The
-> paragraph below claimed re-running produced an identical forest and a
-> byte-identical `phishing_model.json`. That was true of the 691,570-node model it
-> described; it is false of the current pipeline. Three seeded runs of `train.py` on
-> unchanged code produced **three different forests**:
+> **Reproducibility, re-verified Aug 15, 2026.** Training **is** deterministic in a
+> fixed environment: two consecutive runs of `train.py` on identical code produced
+> identical forests (864,614 nodes both times) and identical metrics (90.64% accuracy,
+> FPR 6.62%, 5-fold CV 0.9038 ± 0.0025). Environment: Python 3.11.9, scikit-learn
+> 1.3.0, numpy 1.24.3 (the repo `venv` and system Python carry the same versions, and
+> the two `tldextract` caches hold the same PSL snapshot).
 >
-> | Artifact | Total nodes |
-> |---|---|
-> | Shipped `assets/phishing_model.json` | 806,620 |
-> | `random_forest.pkl` as of Aug 14 | 846,454 |
-> | Re-run Aug 15, same code and seeds | 864,614 |
+> Two caveats on the node counts you will find in this file:
 >
-> In-corpus metrics are stable to ~0.02 pt (90.64% acc / 6.62% FPR vs 90.65% / 6.64%),
-> so this is structural drift rather than a different model class. Likely cause is an
-> unseeded RNG or set-iteration order in the corpus builder — Python randomises string
-> hashing per process unless `PYTHONHASHSEED` is pinned. **This must be fixed before
-> any corpus experiment**, because otherwise an FPR change cannot be distinguished
-> from run-to-run noise.
+> | Artifact | Nodes | Status |
+> |---|---|---|
+> | Shipped `assets/phishing_model.json` | 806,620 | authoritative; predates `38e820d` |
+> | Current retrain, Aug 15 (×2, identical) | 864,614 | today's reproducible baseline |
+> | Figure cited in the Aug 14 note above | 846,454 | **not reproducible today** |
 >
-> The original (now-superseded) claim, kept for provenance:
+> The 846,454 figure cannot be reproduced from the committed tree — the only
+> training-relevant change since is a comment. Most likely it was measured against
+> uncommitted working-tree state. **Cite 864,614 as the retrain baseline**, not 846,454.
+> The substantive point of the Aug 14 warning is unaffected: the shipped model does not
+> reproduce from current code, so it must not be silently replaced.
+>
+> The older claim below described the 691,570-node model and its byte-identical export.
+> That model is long superseded, but the *property* it asserted still holds:
 > Training is fully seeded (`random_state=42` on the split, SMOTE and the forest).
-> Verified by re-running: identical metrics, identical forest (691,570 nodes, matching
-> thresholds) and a **byte-identical** `phishing_model.json`. Only `random_forest.pkl`
-> changes hash between runs, from joblib serialization metadata rather than model
-> content — so don't treat a `.pkl` hash difference as a changed model.
+> Only `random_forest.pkl` changes hash between runs, from joblib serialization
+> metadata rather than model content — so don't treat a `.pkl` hash difference as a
+> changed model.
 
 ### 3a. Unknown-legitimate FPR — the metric that actually gates the product
 
 > **⚠ Provenance warning (Aug 15, 2026).** `validate_unknown_legit.py:83` loads
 > `models/random_forest.pkl`, **not** the shipped `assets/phishing_model.json`. Those
-> are different forests (846k–865k nodes vs 806,620). Every unknown-legit FPR figure
-> in this section therefore describes a model the extension does not load, and — given
-> the reproducibility defect above — one that is not stable between runs either.
-> Re-measuring these populations through the shipped artifact (as `demo_supervisor.mjs`
-> already does for single URLs) is an open follow-up. Same trap family as
-> `test_url.py`, which is already flagged for loading the divergent pkl.
+> are different forests (864,614 vs 806,620 nodes). Every unknown-legit FPR figure in
+> this section therefore describes a model the extension does not load. Re-measuring
+> these populations through the shipped artifact (as `demo_supervisor.mjs` already does
+> for single URLs) is an open follow-up. Same trap family as `test_url.py`, which is
+> already flagged for loading the divergent pkl.
 
 Held-out accuracy measures the corpus, not the goal. The legitimate class is partly
 synthesized, so in-corpus accuracy stays high while genuinely unseen legitimate sites

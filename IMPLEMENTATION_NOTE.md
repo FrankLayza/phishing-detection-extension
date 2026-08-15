@@ -4,10 +4,11 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 15, 2026 (latest) — Closed three holes in the brand guard; found training is not reproducible
+## August 15, 2026 (latest) — Closed three holes in the brand guard; verified training reproducibility
 
 Follow-up to the review entry below. All seven findings are now fixed, the extension is
-rebuilt, and two new defects surfaced while measuring.
+rebuilt, and one new defect surfaced while measuring (plus one false alarm, retracted
+below — worth reading for the reasoning error).
 
 ### The three verdict-level fixes
 
@@ -67,23 +68,34 @@ the allowlist (`myapp.railway.app`, `retro-fanpage.neocities.org`) score 0.216 a
 0.234 through the model, well under the 0.50 cut. The platform correction covers them
 without the allowlist.
 
-### Two new defects found while measuring
+### One new defect, and one retracted claim
 
-**Training is not reproducible.** Timing a retrain (to answer "how long does this
-take?" — **5 min 9 s** including 5-fold CV) produced a *third* distinct forest:
+**~~Training is not reproducible.~~ CORRECTED, same day — it is.** Timing a retrain
+(to answer "how long does this take?" — **5 min 9 s** including 5-fold CV) produced a
+*third* distinct forest, and this entry initially concluded that training was
+non-deterministic. That conclusion was wrong and is retracted.
 
-| Artifact | Total nodes |
-|---|---|
-| Shipped `assets/phishing_model.json` | 806,620 |
-| `random_forest.pkl` as of Aug 14 | 846,454 |
-| Re-run Aug 15, same code and seeds | 864,614 |
+The controlled test — **two consecutive runs on identical code** — had not been run.
+It was, and both produced **identical** forests: 864,614 nodes, 90.64% accuracy,
+FPR 6.62%, 5-fold CV 0.9038 ± 0.0025. Environment: Python 3.11.9, scikit-learn 1.3.0,
+numpy 1.24.3; the repo `venv` and system Python carry the same versions and both
+`tldextract` caches hold the same PSL snapshot.
 
-In-corpus metrics are stable to ~0.02 pt (90.64% / FPR 6.62%), so this is structural
-drift, not a different model class. `SOURCE_OF_TRUTH.md` §3's claim of byte-identical
-reproducibility is now marked **superseded**. Prime suspect is an unseeded RNG or
-`set`/`dict` iteration order in the corpus builder — Python randomises string hashing
-per process unless `PYTHONHASHSEED` is pinned. **This blocks any corpus experiment
-aimed at the FPR**, because an improvement cannot be separated from run-to-run noise.
+| Artifact | Total nodes | Status |
+|---|---|---|
+| Shipped `assets/phishing_model.json` | 806,620 | authoritative; predates `38e820d` |
+| Current retrain, ×2 identical | 864,614 | reproducible baseline — cite this |
+| Figure cited in the Aug 14 note | 846,454 | not reproducible from the committed tree |
+
+Three artefacts differing proves the *inputs* differed, not that the process is random.
+The 846,454 figure was most likely measured against uncommitted working-tree state; the
+only training-relevant change since Aug 14 is a comment. Determinism holds per
+environment, so pin interpreter and library versions when comparing runs.
+
+**Corpus experiments are therefore unblocked** — a before/after difference in a fixed
+environment is real, and no noise floor needs establishing first. The substantive Aug 14
+point stands unaffected: the shipped model does not reproduce from current code, so it
+must not be silently replaced.
 
 **The headline FPR measures a model that isn't shipped.**
 `validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension loads
@@ -103,7 +115,7 @@ no root slash. All three are logged in `handoff.md` §3 B.
   failed.
 
 Docs updated: `CONTEXT.md` (tenant, identity-bound platform, "withholding is not
-accusing"), `SOURCE_OF_TRUTH.md` (§3 reproducibility superseded, §3a provenance
+accusing"), `SOURCE_OF_TRUTH.md` (§3 reproducibility re-verified, §3a provenance
 warning, §8 guard-hardening record), `SUPERVISOR_DEMO.md` (12-row verified table,
 FPR provenance column, revised follow-ups), plus `handoff.md`, `memory.md` and
 `architecture.md`.

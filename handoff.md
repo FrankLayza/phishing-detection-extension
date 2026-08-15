@@ -24,8 +24,8 @@ All seven review findings are **fixed and verified**. The extension has been reb
 | 10 legit platform tenants | all CLEAN 0.181–0.299, no regression |
 | Reported unknown-legit FPR | unchanged (harness doesn't model the platform adapter) |
 
-**Next planned step is Step 0: fix training reproducibility** (see §3, finding A).
-That is a prerequisite for any corpus experiment aimed at the FPR.
+**Step 0 is complete:** training reproducibility was tested and holds (§3 A), so the
+corpus experiment on the FPR is unblocked.
 
 ## 1. What landed
 
@@ -60,44 +60,43 @@ its tenants were being hard-cleared).
 
 ## 3. Open work queue
 
-Ranked. Item A blocks any work on the FPR metric.
+Ranked. Item A was investigated and cleared; B is now the top item.
 
-### A — BLOCKER for FPR work: training is not reproducible
+### A — RESOLVED: training IS reproducible (was flagged as a blocker)
 
-Three seeded runs of `train.py` on unchanged code produced three different forests:
+**Tested and cleared Aug 15, 2026.** Two consecutive runs of `train.py` on identical
+code produced **identical** forests — 864,614 nodes both times — with identical metrics
+(90.64% accuracy, FPR 6.62%, 5-fold CV 0.9038 ± 0.0025). Environment: Python 3.11.9,
+scikit-learn 1.3.0, numpy 1.24.3; the repo `venv` and system Python carry the same
+versions and the two `tldextract` caches hold the same PSL snapshot.
 
-| Artifact | Total nodes |
-|---|---|
-| Shipped `assets/phishing_model.json` | 806,620 |
-| `random_forest.pkl` as of Aug 14 | 846,454 |
-| Re-run Aug 15, same code and seeds | 864,614 |
+An earlier note in this file inferred non-determinism from three differing node counts
+(806,620 / 846,454 / 864,614). That inference was wrong: those came from three
+different tree states, not from randomness. The 846,454 figure cannot be reproduced
+from the committed tree — the only training-relevant change since Aug 14 is a comment —
+so it was most likely measured against uncommitted working-tree state.
 
-In-corpus metrics are stable to ~0.02 pt (90.64% / 6.62% FPR), so this is structural
-drift, not a different model class. `SOURCE_OF_TRUTH.md` §3 previously claimed
-byte-identical reproducibility; that claim is now marked superseded.
+**Consequences:**
+- **Corpus experiments are safe to interpret.** No noise floor needs establishing
+  first; a before/after difference in a fixed environment is real.
+- Cite **864,614** as the current retrain baseline, not 846,454.
+- Still true, and unaffected: the *shipped* 806,620-node model does not reproduce from
+  current code (the root-slash strip landed after it was trained), so it must not be
+  silently replaced.
+- Determinism holds **per environment**. Pin the interpreter and library versions when
+  comparing runs, and re-baseline after any dependency change.
 
-**Prime suspect:** an unseeded RNG or `set`/`dict` iteration order in the corpus
-builder. Python randomises string hashing per process unless `PYTHONHASHSEED` is
-pinned, so any code that iterates a `set` of URLs/domains and then samples from it
-will pick a different subset each run. Look at `build_legit_urls`,
-`measure_structure`, `_synth_*` and the `phi_hosts` set logic in `train.py`.
-
-**Why it blocks:** a corpus experiment that moves FPR from 16% to 14% is
-uninterpretable until you know the run-to-run noise floor. Fix determinism, verify by
-two consecutive runs producing identical node counts, then measure the noise floor
-across 2–3 deliberately different seeds.
-
-Repro:
+Repro (~5 min per run, incl. 5-fold CV):
 
 ```bash
-python ml-pipeline/train.py   # ~5 min 9 s measured, incl. 5-fold CV
+python ml-pipeline/train.py
 python -c "import joblib; rf=joblib.load('models/random_forest.pkl'); print(sum(t.tree_.node_count for t in rf.estimators_))"
 ```
 
 ### B — the headline FPR is measured on a model that isn't shipped
 
 `validate_unknown_legit.py:83` loads `models/random_forest.pkl`; the extension loads
-`assets/phishing_model.json`. Different forests (846k–865k vs 806,620 nodes). So the
+`assets/phishing_model.json`. Different forests (864,614 vs 806,620 nodes). So the
 ~15–16% ML-tier and ~9.9% pipeline figures describe a model nobody runs.
 
 Same trap family as `test_url.py`, which is already flagged for this. Fix: score the
@@ -111,7 +110,7 @@ Two smaller defects in the same harness, worth fixing while there:
 - It builds `https://domain` with no root slash, so it scores a URL shape the browser
   never sends. See `memory.md` §2.
 
-### C — the FPR gap itself (needs A and B first)
+### C — the FPR gap itself (do B first)
 
 ML-tier FPR ~16% against a <10% target. Root cause diagnosed: `DomainLength` is the
 model's **#2 feature** (0.1238 importance) and encodes suffix structure as risk, so
@@ -157,15 +156,13 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
 
 ## 4. Suggested next steps
 
-1. **Step 0 — fix training determinism** (§3 item A). Verify with two consecutive
-   runs producing identical node counts.
-2. **Measure the noise floor** — 2–3 deliberately different seeds, unknown-legit FPR
-   each time. ~7 min per seed. This tells you what change size is real.
-3. **Re-point the FPR harness at the shipped model** (§3 item B), and fix its
+1. ~~Fix training determinism~~ — **done**, it was never broken (§3 A).
+2. **Re-point the FPR harness at the shipped model** (§3 item B), and fix its
    `PHISH_MIN` band and missing root slash while you're in there. After this you can
-   answer "what is your false positive rate?" defensibly.
-4. **Then, and only then, the corpus experiment** (§3 item C) — distribution-match
-   domain length and suffix shape in the legitimate class.
+   answer "what is your false positive rate?" defensibly. This is now the top item.
+3. **Then the corpus experiment** (§3 item C) — distribution-match domain length and
+   suffix shape in the legitimate class. Retrains are ~5 min and reproducible, so
+   before/after comparisons are directly interpretable.
 5. If a retrain is adopted: re-export via `export_model_json.py`, regenerate
    `shap_mapping.json`, **re-calibrate the 0.50/0.90 bands** (`sweep_thresholds.py` —
    they were tuned to the old model's score distribution), re-measure, update
