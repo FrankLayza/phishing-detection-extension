@@ -4,8 +4,8 @@
 
 Read `architecture.md` for structure, `memory.md` for traps, `SOURCE_OF_TRUTH.md`
 for numbers. This file is the transient layer: what just landed, what's open, and
-what to pick up. It supersedes the state section of `WORK_SESSION.md`, which is
-stale (Aug 5).
+what to pick up. It replaced `WORK_SESSION.md`, which was a stale (Aug 5) snapshot and
+has been deleted.
 
 ---
 
@@ -205,7 +205,7 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
 - `shap_mapping.json` is model-derived and would need regenerating after any retrain,
   as would the calibrated 0.50/0.90 bands (`sweep_thresholds.py`).
 - ~20 MB model, ~1 s MV3 cold start per worker wake.
-- `cross_validate_ts.mjs` prints stale text for a 21-feature model.
+- ~~`cross_validate_ts.mjs` prints stale text~~ — deleted with the other drifted scripts.
 
 ## 4. Suggested next steps
 

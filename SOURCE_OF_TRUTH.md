@@ -246,10 +246,17 @@ at this retrain, since data-derived TLD values split more cleanly than a 0.50 de
 > The browser-path JSON traversal is what matters for the extension: **~1 ms median**.
 > Python sklearn latency is expected higher overhead for a Python process with 100 trees.
 
-**Python↔TypeScript inference parity:** Verified on 6 test URLs via `cross_validate_ts.mjs`.
-All 6 passed within a 0.01 probability tolerance (max observed delta ~0.007).
-Note: this is a small smoke-test sample. Do not cite as "100% parity, 0.000000 divergence"
-— the accurate claim is "6 of 6 test URLs matched within a 0.01 tolerance."
+**Python↔TypeScript inference parity:** the Python tree-walker in
+`validate_unknown_legit.py` (`ShippedModel`) and the JS one in `demo_supervisor.mjs` were
+cross-checked on 4 URLs spanning the score range — 0.199 / 0.596 / 0.838 / 0.866,
+**exact agreement to 3 decimal places** — and both report the committed forest's 806,620
+nodes. Both implement `val * scale + min`, `<=` goes left, and soft-voting over
+`n_estimators`.
+
+> Supersedes the old `cross_validate_ts.mjs` 6-URL smoke test (0.01 tolerance), which was
+> deleted Aug 15, 2026 because it printed "All 44 scaled values match" for a 21-feature
+> model. The replacement is stronger: exact agreement rather than a tolerance, and it runs
+> inside the harness that produces the headline metric.
 
 **Python↔TypeScript EXTRACTOR parity (the one that matters):** the browser's
 `feature-extractor.ts` must produce the same 21 feature values the model was trained on.
@@ -388,13 +395,16 @@ char-frequency tables, and — since Aug 2026 — the same Public-Suffix-List do
 | 44 features | v4 uses **21** (lexical-only) |
 | Dataset ~235k | Phishing: 100,945 PhiUSIIL; Legit: 110,000 Cisco top-1M |
 | Model is "lightweight" | JSON export = 19.4 MB (down from 175.8 MB) |
-| "100% parity, 0.000000 divergence" | 6/6 URLs within 0.01 tolerance; max delta ~0.007 |
+| "100% parity, 0.000000 divergence" | Extractor parity 0 mismatches / 20,160 values; inference exact on 4 cross-checked URLs |
 
 ## 7. Pipeline commands
 ```
 python ml-pipeline/train.py                                          # retrain → models/*.pkl + metrics
 python ml-pipeline/export_model_json.py                              # → phishing-extension/assets/phishing_model.json
-python ml-pipeline/gen_cross_validation.py && node cross_validate_ts.mjs   # parity check
+node ml-pipeline/gen_parity_features.mjs && python ml-pipeline/check_parity.py  # extractor parity (960 URLs)
+python ml-pipeline/validate_unknown_legit.py                          # unknown-legit FPR (shipped model)
+python ml-pipeline/diagnose_fpr.py                                   # which feature drives the FPR
+node ml-pipeline/demo_supervisor.mjs [urls...]                        # score through the shipped pipeline
 python ml-pipeline/benchmark_inference.py                            # latency benchmark (sklearn + JSON)
 python ml-pipeline/validate_realworld.py                             # spot-check on 20 curated URLs
 python ml-pipeline/gen_shap_table.py                                 # → models/shap_values.json (SHAP + directions)
@@ -422,9 +432,10 @@ cd phishing-extension && pnpm build                                  # → build
   Root cause: `NoOfSubDomain` (importance 0.256) and `DomainLength` (0.158) interact
   poorly with long paths from short brand domains. Mitigation: brand-list augmentation
   or path-depth normalisation in the feature extractor.
-- **Parity sample size:** `cross_validate_ts.mjs` (inference smoke test) still uses 6 URLs.
-  Extractor parity is now validated at 960 URLs via `check_parity.py` — cite that, not the
-  6-URL script, for train/serve claims.
+- ~~**Parity sample size:**~~ resolved. The 6-URL `cross_validate_ts.mjs` smoke test was
+  deleted; extractor parity is validated at 960 URLs / 20,160 values via `check_parity.py`,
+  and inference parity is now an exact Python↔JS cross-check inside the FPR harness. Cite
+  those.
 - **SHAP explanations** in `shap-approximator.ts` are still global-importance lookups
   with mostly static text. Functional but not true per-prediction SHAP.
 - **`shap_mapping.json` is stale and incomplete (extension-facing bug).** It holds only
@@ -436,9 +447,6 @@ cd phishing-extension && pnpm build                                  # → build
 - **Dead code in `train.py`:** `augment_legitimate_urls()` and `inject_popular_legit()`
   are defined but never called — `build_legit_urls_from_top_sites()` does the structure
   augmentation inline. Harmless, but they read as active pipeline stages.
-- **`cross_validate_ts.mjs` prints stale text:** hardcodes "All 44 scaled values match"
-  (model has 21) and still frames itself as diagnosing the scaler bug fixed in 0537be5,
-  printing "SCALER BUG IDENTIFIED" and "fix the scaler formula and ship it" on success.
 - **Brand-in-subdomain impersonation (fixed Aug 14, 2026 via reputation, not the model).**
   Platform-hosted phish clones (`microsoft-verify-login.netlify.app`, `secure-paypal-verify.vercel.app`)
   were being cleared by the advisory platform correction (TLD neutralisation) dropping them to CLEAN.

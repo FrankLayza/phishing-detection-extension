@@ -159,6 +159,17 @@ Verdict bands (calibrated): **CLEAN < 0.50** · **SUSPICIOUS 0.50–0.90** ·
 
 ## Do NOT use for the demo
 
-- `ml-pipeline/test_url.py` — loads the divergent retrain pkl, old 0.50/0.85
-  bands, no reputation layer. Drifted; superseded by `demo_supervisor.mjs`.
-- `diagnose_url.mjs` — inlined drift of the extractor at the repo root.
+These drifted scripts were **deleted** on Aug 15, 2026 rather than left as traps.
+Recoverable from git history if ever needed:
+
+- `ml-pipeline/test_url.py` — loaded the divergent retrain pkl with old 0.50/0.85 bands
+  and no reputation layer.
+- `diagnose_url.mjs`, `simulate_extension.mjs` — each carried its own inlined copy of the
+  extractor, which drifted from the real one and gave different answers for the same URL.
+- `cross_validate_ts.mjs` (+ `cross_validation_data.json`, `gen_cross_validation.py`) —
+  a 6-URL inference smoke test that printed "All 44 scaled values match" for a
+  21-feature model.
+
+**Use `ml-pipeline/demo_supervisor.mjs` for everything.** It is the only script that
+bundles the real extractor from `src/` and loads the committed model, so it cannot drift
+away from what the extension does.

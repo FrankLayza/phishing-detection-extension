@@ -35,7 +35,9 @@ the icon. Several bugs were only ever caught that way.
 3. **Browser URL shape ≠ corpus URL shape.** Harnesses build `'https://' + domain`;
    Chrome sends `https://domain/`. That slash was worth +26 points of FPR (see §2).
    Score URLs in browser form. Use `score_shipped.mjs` or `demo_supervisor.mjs`;
-   **never** `diagnose_url.mjs` (drifted inlined extractor, gives a third answer).
+   `diagnose_url.mjs` carried its own inlined extractor and gave a third answer for the
+   same URLs; it was deleted Aug 15, 2026 along with `simulate_extension.mjs`, which had
+   the same defect.
 4. **A verdict outlived its page.** `result_<tabId>` was only cleared on tab
    *close*, so navigating showed "Safe · google.com" over a live phishing URL —
    complete with green shield. Fixed in two layers (popup URL equality +
@@ -332,7 +334,11 @@ match sklearn exactly. The parity gate independently confirms 0 mismatches acros
 - **Verdict-affecting changes are deliberate reviewed decisions**, not drive-by
   fixes. This is why the findings in `handoff.md` §3 were reported rather than
   patched.
-- Known stale tooling: `test_url.py` (divergent pkl, old 0.50/0.85 bands, no
-  reputation layer), `diagnose_url.mjs` (drifted inlined extractor),
-  `cross_validate_ts.mjs` (prints "All 44 scaled values match" for a 21-feature
-  model). Don't use them for evidence.
+- **The drifted scripts are gone (Aug 15, 2026).** `test_url.py`, `diagnose_url.mjs`,
+  `simulate_extension.mjs`, `cross_validate_ts.mjs` and its data/generator were deleted
+  rather than left as traps, along with the dead `train_model.py` stub and the stale
+  `WORK_SESSION.md`. Each of the first three carried an inlined copy of the extractor or
+  loaded the wrong model, and each had already produced a wrong answer someone acted on.
+  Recoverable from git history. **The rule going forward: a script that scores URLs must
+  bundle the real extractor from `src/` (esbuild) and load the committed model** — that is
+  what `demo_supervisor.mjs`, `score_shipped.mjs` and `gen_parity_features.mjs` do.

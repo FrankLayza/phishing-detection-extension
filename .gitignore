@@ -81,6 +81,9 @@ MODEL_AUDIT.md
 AUDIT_SUMMARY.md
 # Scratch / dissertation tooling
 PROJECT_UPDATED_DETAILS.md
+# Personal briefing document — written for the author, not a project artifact.
+# The committed equivalents are README.md / SOURCE_OF_TRUTH.md / SUPERVISOR_DEMO.md.
+PROJECT_REPORT.md
 correct_dissertation.py
 docx_extracted.txt
 FINAL_YEAR_RESEARCH_PROJECT_COMPLETE_CORRECTED.docx
