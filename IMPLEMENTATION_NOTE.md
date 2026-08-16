@@ -4,7 +4,98 @@ This note details the changes and enhancements implemented in the PhishGuard Chr
 
 ---
 
-## August 15, 2026 (latest) — The FPR diagnosis was wrong; the corpus fix was measured and rejected
+## August 16, 2026 (latest) — Final cleanup; the parity fixture was one `rm` from being lost
+
+Closing pass on the finalisation request: build once more, strip stale artifacts, confirm
+the documented commands still reproduce their documented numbers.
+
+### A gitignored file was a required input to the project's headline proof
+
+While deciding what was safe to delete, `parity_urls.json` looked like a generated
+artifact — `.gitignore` listed it under *"Parity harness generated artifacts (rebuilt on
+demand)"*, alongside `parity_ts.json` and `__parity_bundle.mjs`. It is not generated.
+`gen_parity_features.mjs:57` **reads** it:
+
+```js
+const urls = JSON.parse(readFileSync(join(root, "parity_urls.json"), "utf-8"));
+```
+
+No script in the repository writes it. It is the 960-URL fixture, dated Aug 5, and it was
+untracked — so it existed in exactly one place, this working copy, with no git copy behind
+it. Two consequences:
+
+1. Deleting it as "stale generated output" would have destroyed the parity gate
+   permanently. That is the delete I was about to make.
+2. A fresh clone could never have run `check_parity.py` at all — while `README.md`,
+   `SOURCE_OF_TRUTH.md` and `PROJECT_REPORT.md` all present the 20,160-value parity gate
+   as the central correctness proof and hand the reader the two commands to reproduce it.
+
+**Fix:** `parity_urls.json` un-ignored and committed (39 KB), with the reason recorded in
+`.gitignore` so nobody re-adds it. `parity_ts.json` (607 KB) stays ignored — that one
+genuinely is output.
+
+**The transferable point** is the same one `memory.md` already records about stale
+artifacts, arriving from the other direction: a `.gitignore` comment is a *claim* about a
+file's provenance, not evidence. The evidence is which script opens it for reading and
+which opens it for writing. Grepping for the filename took one command and changed the
+decision from "delete" to "commit".
+
+### Removed
+
+| Path | Why safe |
+|---|---|
+| `ml-pipeline/__parity_bundle.mjs` | esbuild output; every run rebuilds it |
+| `ml-pipeline/__rep_bundle.mjs` | idem (`demo_supervisor.mjs:41`) |
+| `ml-pipeline/__score_bundle.mjs` | idem (`demo_supervisor.mjs:33`) |
+| `parity_ts.json` | written by `gen_parity_features.mjs:68` on every run |
+| `models/unknown_legit_validation_pkl.json` | output of `--model pkl`, cited by no document, and confusable by filename with the shipped-model measurement next to it |
+
+### Deliberately kept — with reasons, so this is not re-litigated
+
+* **`models/random_forest.pkl` (69 MB)** and its `scaler.pkl` / `feature_names.pkl`. Not
+  the shipped model, gitignored, and reproducible in ~5 min — but eight scripts load it
+  (`export_model_json.py`, `evaluate.py`, `benchmark_inference.py`, `gen_shap_table.py`,
+  `shap_explainer.py`, `generate_shap_plots.py`, `validate_realworld.py`,
+  `validate_unknown_legit.py --model pkl`). Breaking eight scripts before a supervisor
+  demo is a worse trade than 69 MB of disk.
+* **`models/shap_values.json`, `threshold_sweep.json`, `realworld_validation.json`.**
+  Older than this session's changes, so tempting targets — but each is the *cited
+  provenance* for numbers already written into `SOURCE_OF_TRUTH.md` (§ SHAP table, verdict
+  bands) and into the dissertation (Table 4.8 byte-matches `shap_values.json`; §4.9 comes
+  from `realworld_validation.json`). Deleting them would leave those numbers unsourced.
+* **`ml-pipeline/__tld_counts.json`.** A cache whose inputs (corpus + top-1m) have not
+  changed; rebuilding costs a full scan for no benefit.
+* **`_out_*.txt`, `docx_extracted.txt`** (~370 KB, dissertation text dumps). Gitignored,
+  unrelated to the extension, and I could not confirm which arguments to `_extract_docx.py`
+  produced which file — so regeneration is a guess, and the delete is irreversible. Left in
+  place and flagged rather than guessed at.
+
+### Verified after the cleanup, not before
+
+Both commands the documentation hands the reader were run from the cleaned state, so the
+bundles were rebuilt from source rather than reused:
+
+* `node ml-pipeline/gen_parity_features.mjs && python ml-pipeline/check_parity.py` →
+  960 URLs, 20,160 values, **0 mismatches**, 0 extraction errors.
+* All seven `README.md` test URLs re-scored through `demo_supervisor.mjs` →
+  every score identical to the published table (`gtbank.com` 0.199, `my-portfolio.vercel.app`
+  0.269 from raw 0.838, `microsoft.github.io` 0.221 from raw 0.557, `paypal.vercel.app`
+  0.866 withheld, `microsoft-verify-login.netlify.app` 0.828 withheld,
+  `paypa1-login.vercel.app/confirm` 0.925 → PHISHING).
+
+Build state unchanged from the Aug 15 production build (`tsc` exit 0, 3/3 assets copied);
+model md5 `c39d40fd2ed03e80ced29c2f0a6eb57d` identical in `assets/` and
+`build/chrome-mv3-prod/assets/`.
+
+### Not done: push
+
+`git remote -v` is empty, there is no upstream for `main`, and `gh` is not installed. Nine
+commits sit on local `main` with nowhere to go. Naming or creating the destination is the
+author's call, not mine — see `handoff.md` §3.
+
+---
+
+## August 15, 2026 — The FPR diagnosis was wrong; the corpus fix was measured and rejected
 
 Ran the corpus experiment on the unknown-legitimate FPR. The intervention was rejected,
 but the diagnostic work overturned a claim this project had been building on for days.

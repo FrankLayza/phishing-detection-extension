@@ -1,6 +1,7 @@
 # PhishGuard — Handoff
 
-**As of:** August 15, 2026 · branch `main` · working tree clean.
+**As of:** August 16, 2026 · branch `main` · working tree clean · **9 commits unpushed
+(no remote configured — see §0.1)**.
 
 Read `architecture.md` for structure, `memory.md` for traps, `SOURCE_OF_TRUTH.md`
 for numbers. This file is the transient layer: what just landed, what's open, and
@@ -26,12 +27,38 @@ All seven review findings are **fixed and verified**. The extension has been reb
 
 **Steps 0 and B are complete.** Training reproducibility was tested and holds (§3 A),
 and the FPR harness now scores the shipped artifact (§3 B). The corpus experiment on the
-FPR (§3 C) is unblocked and is the next substantive piece of work.
+FPR (§3 C) was run and its intervention rejected on measurement.
+
+**Aug 16 closing pass.** Stale artifacts removed, both documented reproduction commands
+re-run from the cleaned state (parity 0/20,160; all seven `README.md` URLs re-score to
+their published values). One defect surfaced during the sweep and was fixed:
+`parity_urls.json` — the 960-URL fixture `gen_parity_features.mjs:57` **reads** — was
+gitignored and untracked, so it existed only in this working copy and a fresh clone could
+never have run the parity gate. It is now committed. Full detail in
+`IMPLEMENTATION_NOTE.md` (Aug 16 entry), including what was deliberately *kept* and why.
+
+## 0.1 Not done: push — no remote exists
+
+`git remote -v` is empty, `main` has no upstream, and `gh` is not installed. Nine commits
+are on local `main` with nowhere to go. Whoever picks this up needs the destination from
+the author; do not create or publish a repository on their behalf. Once the URL is known:
+
+```bash
+git remote add origin <url>
+git push -u origin main
+```
+
+Nothing else in the finalisation request is outstanding.
 
 ## 1. What landed
 
 ```
-<pending> fix: close three holes in the brand-impersonation guard
+<pending> chore: commit the parity fixture, drop regenerable artifacts
+d1e670b   docs: add README, remove drifted scripts and stale artifacts
+86f0d84   fix: retract the DomainLength FPR diagnosis; reject the corpus intervention
+a6075b6   fix: FPR harness now scores the shipped model, not the last retrain
+e543753   docs: retract the non-determinism claim — training is reproducible
+69d7373   fix: close three holes in the brand-impersonation guard
 ebd0314   docs: add architecture/handoff/memory as the cross-session pickup point
 eb3e2b3   feat: brand-impersonation guard for platform-hosted clones
 7f77ebc   chore: ignore demo-generated bundles and dissertation scratch files
@@ -218,22 +245,25 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
    it gained. The residual FPR is an information ceiling, which is a finding rather than
    a task.
 
-**Nothing on this list is blocking a demo.** What is left is judgement, not work:
+**Nothing on this list is blocking a demo.** What is left is one mechanical step and some
+judgement calls:
 
-4. Decide §3 D (whether brand impersonation should add risk rather than only withhold a
+4. **Push** — needs a remote URL from the author (§0.1). This is the only incomplete item
+   from the finalisation request.
+5. Decide §3 D (whether brand impersonation should add risk rather than only withhold a
    discount). Currently documented as a deliberate limitation and shown in the demo.
-5. Decide whether to extend `PLATFORM_HOSTS` to the user-content hosts listed in §3 E —
+6. Decide whether to extend `PLATFORM_HOSTS` to the user-content hosts listed in §3 E —
    a data judgement about corporate tenants that could introduce false positives.
-6. For the write-up: the three strongest results are the train/serve parity gate
+7. For the write-up: the three strongest results are the train/serve parity gate
    (0 mismatches / 20,160 values), the honest metric provenance (every figure measured
    on the shipped artifact), and the documented ablations — including two rejected ones
    and one retracted diagnosis. That last item is a contribution, not an embarrassment;
    most published work on PhiUSIIL reports 99%+ by exploiting a contaminated column.
-5. If a retrain is adopted: re-export via `export_model_json.py`, regenerate
+8. If a retrain is adopted: re-export via `export_model_json.py`, regenerate
    `shap_mapping.json`, **re-calibrate the 0.50/0.90 bands** (`sweep_thresholds.py` —
    they were tuned to the old model's score distribution), re-measure, update
    `SOURCE_OF_TRUTH.md`, rebuild.
-6. Append a dated entry to `IMPLEMENTATION_NOTE.md` for whatever lands (standing
+9. Append a dated entry to `IMPLEMENTATION_NOTE.md` for whatever lands (standing
    project convention).
 
 ## 5. Environment notes (Windows, this repo)

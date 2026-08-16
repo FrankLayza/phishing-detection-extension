@@ -31,9 +31,13 @@ models/*.json
 # Keep the models folder struct but ignore pickles
 !models/.gitkeep
 
-# Parity harness generated artifacts (rebuilt on demand)
+# Parity harness generated artifacts (rebuilt on demand).
+# NOTE: parity_urls.json is deliberately NOT ignored. It is the 960-URL *fixture*
+# that gen_parity_features.mjs reads as input (gen_parity_features.mjs:57) — no
+# script regenerates it. While it was ignored, a fresh clone could not run the
+# parity gate at all, even though README/SOURCE_OF_TRUTH present that gate as the
+# project's central correctness proof. It is committed for that reason.
 ml-pipeline/__parity_bundle.mjs
-parity_urls.json
 parity_ts.json
 # Supervisor-demo generated bundles (rebuilt by demo_supervisor.mjs on every run)
 ml-pipeline/__rep_bundle.mjs

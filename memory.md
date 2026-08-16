@@ -7,7 +7,7 @@ because a check passed while the product was broken.
 Companion docs: `architecture.md` (structure) · `handoff.md` (current state) ·
 `SOURCE_OF_TRUTH.md` (numbers) · `CONTEXT.md` (vocabulary).
 
-**Status legend:** ✅ verified current (Aug 15, 2026) · ⚠️ still open · 🔒 fixed, kept
+**Status legend:** ✅ verified current (Aug 16, 2026) · ⚠️ still open · 🔒 fixed, kept
 here so the failure mode isn't reintroduced.
 
 ---
@@ -21,6 +21,10 @@ build, the bundle or a stale copy, the corpus URL shape or the browser's.
 
 The one check that has never lied is loading the extension in Chrome and clicking
 the icon. Several bugs were only ever caught that way.
+
+**Second half of the same lesson (§1.6):** also ask whether the check can *run* for
+someone who isn't you. One gate passed reliably here for months while being impossible to
+run from a fresh clone, because its input fixture was gitignored.
 
 ## 1. The four harness lies 🔒
 
@@ -66,6 +70,27 @@ the icon. Several bugs were only ever caught that way.
    the missing root slash **needed no fix** — `38e820d` strips a lone root slash in both
    extractors, so `https://d` and `https://d/` now give byte-identical features
    (verified). Do not append slashes to path URLs; there the slash is real structure.
+
+### …and a sixth, of a different kind 🔒
+
+6. **A `.gitignore` comment mislabelled a required input as generated output.** Found
+   Aug 16, 2026 during the final stale-file sweep. `.gitignore` grouped
+   `parity_urls.json` under *"Parity harness generated artifacts (rebuilt on demand)"*
+   next to `parity_ts.json` and `__parity_bundle.mjs`. It is not generated —
+   `gen_parity_features.mjs:57` **reads** it, and nothing in the repo writes it. It was
+   the 960-URL fixture, untracked, existing in exactly one working copy.
+
+   Two failures in one: deleting it as "stale output" would have destroyed the parity
+   gate with no git copy to restore from, and while it stayed ignored **a fresh clone
+   could never run the parity gate at all** — the gate the README and `SOURCE_OF_TRUTH.md`
+   both present as the project's central correctness proof. Now committed, with the
+   reason recorded inline in `.gitignore`.
+
+   **The lesson:** a comment about a file's provenance is a claim, not evidence. The
+   evidence is which script opens it for reading and which opens it for writing. Grep the
+   filename before deleting anything — it cost one command and reversed the decision.
+   Corollary for the whole cleanup class: `git rm` is recoverable, `rm` on a gitignored
+   file is not.
 
 ## 1a. Reproducibility: verified, and a cautionary tale ✅
 
