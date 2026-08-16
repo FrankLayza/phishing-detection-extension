@@ -3,9 +3,20 @@ import { ShapApproximator } from "../ml/shap-approximator";
 import { reputation } from "../ml/reputation";
 import { urlCache } from "../utils/cache";
 import type { DetectionResult } from "../types";
+import { CLEAN_MAX, PHISHING_MIN, verdictFor, type Verdict } from "../verdict";
 
 const mlRunner = new MLRunner();
 const shapApproximator = new ShapApproximator();
+
+function setBadge(tabId: number, verdict: Verdict): void {
+  const badge = {
+    CLEAN: { text: "✓", color: "#1a7a3c" },
+    SUSPICIOUS: { text: "?", color: "#b26a00" },
+    PHISHING: { text: "!", color: "#b91c1c" },
+  }[verdict];
+  chrome.action.setBadgeText({ text: badge.text, tabId });
+  chrome.action.setBadgeBackgroundColor({ color: badge.color, tabId });
+}
 
 // Initialize models + reputation adapters
 Promise.all([mlRunner.init(), shapApproximator.init(), reputation.init()]).catch(console.error);
@@ -39,7 +50,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const repResult: DetectionResult = {
             url,
             timestamp: Date.now(),
-            prediction: { isPhishing: false, score: 0.05, source: 'OVERRIDE' },
+            prediction: { score: 0.05, verdict: "CLEAN", source: 'OVERRIDE' },
             explanations: rep.signals,
             processingTimeMs: Date.now() - startTime,
           };
@@ -47,8 +58,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const repTabId = sender.tab?.id;
           if (repTabId) {
             await chrome.storage.local.set({ [`result_${repTabId}`]: repResult });
-            chrome.action.setBadgeText({ text: "✓", tabId: repTabId });
-            chrome.action.setBadgeBackgroundColor({ color: "#00FF00", tabId: repTabId });
+            setBadge(repTabId, repResult.prediction.verdict);
           }
           sendResponse({ success: true, result: repResult });
           return;
@@ -71,19 +81,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const correctionApplied =
           rep.kind === "platform" &&
           !rep.impersonation &&
-          mlPrediction.score < 0.9;
+          mlPrediction.score < PHISHING_MIN;
         const usedFeatures = correctionApplied ? rep.features : features;
         if (correctionApplied) {
           mlPrediction = await mlRunner.predict(rep.features);
         }
         
         // 3b. Google Safe Browsing API Fallback for borderline cases
-        const storage = await chrome.storage.local.get(["riskThreshold", "useGsbFallback", "gsbKey"]);
-        const threshold = storage.riskThreshold || 0.5;
+        const storage = await chrome.storage.local.get(["useGsbFallback", "gsbKey"]);
         const useGsb = storage.useGsbFallback !== false;
+        let predictionSource: DetectionResult["prediction"]["source"] = "ML";
         
-        // If it's borderline (e.g., within 0.15 of threshold) and GSB is enabled
-        if (useGsb && storage.gsbKey && Math.abs(mlPrediction.score - threshold) < 0.15) {
+        // Check scores near the CLEAN/SUSPICIOUS boundary. Verdict bands are
+        // calibrated product constants rather than a user-controlled threshold.
+        if (useGsb && storage.gsbKey && Math.abs(mlPrediction.score - CLEAN_MAX) < 0.15) {
           try {
             const apiResp = await fetch(`https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${storage.gsbKey}`, {
               method: 'POST',
@@ -101,8 +112,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const apiData = await apiResp.json();
             if (apiData.matches && apiData.matches.length > 0) {
               // Override ML prediction if GSB flags it
-              mlPrediction.isPhishing = true;
               mlPrediction.score = 0.99;
+              mlPrediction.verdict = verdictFor(mlPrediction.score);
+              predictionSource = "GSB";
             }
           } catch (apiErr) {
             console.error("GSB API Error:", apiErr);
@@ -125,7 +137,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           timestamp: Date.now(),
           prediction: {
             ...mlPrediction,
-            source: 'ML'
+            source: predictionSource
           },
           explanations,
           processingTimeMs: Date.now() - startTime
@@ -141,13 +153,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         // Update badge
-        if (result.prediction.isPhishing) {
-          chrome.action.setBadgeText({ text: "!", tabId });
-          chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId });
-        } else {
-          chrome.action.setBadgeText({ text: "✓", tabId });
-          chrome.action.setBadgeBackgroundColor({ color: "#00FF00", tabId });
-        }
+        if (tabId) setBadge(tabId, result.prediction.verdict);
 
         sendResponse({ success: true, result });
       } catch (e) {

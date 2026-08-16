@@ -1,3 +1,5 @@
+import type { Verdict } from "../verdict";
+
 /**
  * v3 lexical-only feature set (21 URL-string features).
  * DOM/content features were dropped to eliminate train/serve skew — these
@@ -18,8 +20,8 @@ export interface FeatureVector {
 export type FeatureArray = Float32Array;
 
 export interface ModelPrediction {
-  isPhishing: boolean;
   score: number;
+  verdict: Verdict;
   threatType?: string;
   source: 'ML' | 'GSB' | 'OVERRIDE';
 }

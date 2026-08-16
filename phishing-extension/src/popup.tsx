@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import type { DetectionResult } from "./types"
+import { verdictFor, type Verdict } from "./verdict"
 
 /* ─── Design tokens ──────────────────────────────────────────────────────────
    Palette: off-white base, neutral greys, three verdict colours (muted, not neon)
@@ -275,8 +276,6 @@ function labelFor(raw: string): { name: string; tag: string } {
 }
 
 // ── Verdict config ────────────────────────────────────────────────────────
-type VKey = "CLEAN" | "SUSPICIOUS" | "PHISHING"
-
 // Verdict bands, calibrated Aug 9 2026 against the unknown-legit corpus
 // (ml-pipeline/sweep_thresholds.py -> models/threshold_sweep.json).
 //
@@ -287,13 +286,13 @@ type VKey = "CLEAN" | "SUSPICIOUS" | "PHISHING"
 // because it — not the PHISHING cut — governs recall, and raising it to 0.65
 // would have cost 8.7 points of phishing caught (88.8% -> 80.1%) to buy FPR
 // the middle tier already handles more safely.
-function verdictFor(score: number): VKey {
-  if (score < 0.5)  return "CLEAN"
-  if (score < 0.90) return "SUSPICIOUS"
-  return "PHISHING"
-}
-
-const VERDICT_CONFIG = {
+const VERDICT_CONFIG: Record<Verdict, {
+  label: string
+  sub: string
+  color: string
+  bg: string
+  strip: string
+}> = {
   CLEAN: {
     label: "Safe",
     sub: "No threats detected on this page",
@@ -500,7 +499,7 @@ export default function Popup() {
 
   // ── Result state ───────────────────────────────────────────────────────
   const score      = result.prediction.score
-  const vkey       = verdictFor(score)
+  const vkey       = result.prediction.verdict ?? verdictFor(score)
   const vc         = VERDICT_CONFIG[vkey]
   const isReputation = result.prediction.source === "OVERRIDE"
   const mlSignals  = (result.explanations ?? []).filter(e => e.category !== "Reputation")

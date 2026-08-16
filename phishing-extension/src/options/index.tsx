@@ -4,16 +4,12 @@ import { Storage } from "@plasmohq/storage";
 const storage = new Storage();
 
 export default function Options() {
-  const [threshold, setThreshold] = useState<number>(0.5);
   const [gsbKey, setGsbKey] = useState<string>("");
   const [useGsb, setUseGsb] = useState<boolean>(true);
   const [showToast, setShowToast] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
   useEffect(() => {
-    storage.get("riskThreshold").then((val) => {
-      if (val) setThreshold(Number(val));
-    });
     storage.get("gsbKey").then((val) => {
       if (val) setGsbKey(val as string);
     });
@@ -23,7 +19,6 @@ export default function Options() {
   }, []);
 
   const saveOptions = async () => {
-    await storage.set("riskThreshold", threshold);
     await storage.set("gsbKey", gsbKey);
     await storage.set("useGsbFallback", useGsb);
     
@@ -70,61 +65,6 @@ export default function Options() {
           </p>
         </div>
 
-        {/* Sensitivity Card */}
-        <div style={{
-          backgroundColor: "#ffffff",
-          borderRadius: 12,
-          border: "1px solid #e4e4e7",
-          padding: 24,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 16
-        }}>
-          <div>
-            <h2 style={{ margin: "0 0 4px 0", fontSize: 16, fontWeight: 700 }}>Detection Sensitivity</h2>
-            <p style={{ margin: 0, fontSize: 13, color: "#71717a", lineHeight: 1.5 }}>
-              Set the risk score threshold above which a webpage is classified as phishing. Lower thresholds increase security but may cause more false positives.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#71717a" }}>Risk Threshold</span>
-              <span style={{
-                fontSize: 20,
-                fontWeight: 800,
-                color: "#18181b",
-                fontVariantNumeric: "tabular-nums"
-              }}>{(threshold * 100).toFixed(0)}%</span>
-            </div>
-            
-            <input 
-              type="range" 
-              min="0.1" 
-              max="0.9" 
-              step="0.05" 
-              value={threshold} 
-              onChange={(e) => setThreshold(Number(e.target.value))} 
-              style={{
-                width: "100%",
-                height: 6,
-                backgroundColor: "#e4e4e7",
-                borderRadius: 3,
-                outline: "none",
-                cursor: "pointer",
-                WebkitAppearance: "none"
-              }}
-            />
-            
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#a1a1aa", fontWeight: 500 }}>
-              <span>High Alert (10%)</span>
-              <span>Balanced (50%)</span>
-              <span>High Confidence (90%)</span>
-            </div>
-          </div>
-        </div>
-
         {/* Fallback Services Card */}
         <div style={{
           backgroundColor: "#ffffff",
@@ -139,7 +79,7 @@ export default function Options() {
           <div>
             <h2 style={{ margin: "0 0 4px 0", fontSize: 16, fontWeight: 700 }}>Defense in Depth</h2>
             <p style={{ margin: 0, fontSize: 13, color: "#71717a", lineHeight: 1.5 }}>
-              For borderline classifications (within 15% of your threshold), query Google Safe Browsing as an external verification layer.
+              For scores near the boundary between clean and suspicious, query Google Safe Browsing as an external verification layer.
             </p>
           </div>
 

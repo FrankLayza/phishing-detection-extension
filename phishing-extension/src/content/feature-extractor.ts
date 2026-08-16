@@ -1,16 +1,12 @@
 /**
  * PhishGuard Browser-Side Feature Extractor
  * ==========================================
- * Extracts all 44 features matching the Python pipeline exactly.
- * Canonical feature index order from PRD Section 3.2.
- *
- * Group A: Lexical Features  (indices 0–20)  — from URL string only
- * Group B: Domain Features   (indices 21–30) — from DOM/HTML
- * Group C: Content Features  (indices 31–43) — from DOM/HTML
+ * Extracts the 21 lexical URL features used by the Python pipeline and the
+ * shipped Random Forest. The feature names and order must remain identical on
+ * both sides of the train/serve boundary.
  *
  * Python references:
  *   ml-pipeline/features/lexical_extractor.py
- *   ml-pipeline/features/content_extractor.py
  */
 import type { FeatureVector } from "../types";
 import { parseHost, rawHost, rawPath } from "../ml/tldextract";
@@ -157,7 +153,7 @@ function charProbability(url: string): number {
  */
 
 // ---------------------------------------------------------------------------
-// Main extractor — produces all 44 features in canonical index order
+// Main extractor — produces all 21 lexical features in canonical index order
 // ---------------------------------------------------------------------------
 
 export function extractPageFeatures(url: string, _html?: string): FeatureVector {
@@ -309,8 +305,6 @@ export function extractPageFeatures(url: string, _html?: string): FeatureVector 
 
   // =========================================================================
   // Return the 21 lexical features in canonical index order (0–20).
-  // DOM/content features (old indices 21–43) were removed in v3 to eliminate
-  // train/serve skew — see SOURCE_OF_TRUTH.md.
   // =========================================================================
   return {
     URLLength,                    // 0

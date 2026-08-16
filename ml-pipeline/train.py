@@ -1,15 +1,10 @@
 """
-PhishGuard Model Training Pipeline (v2 — Self-Extracted Features)
-=================================================================
-Key change from v1: Lexical features are now SELF-EXTRACTED from raw URL
-strings using our own extract_lexical_features() — the SAME function used
-at inference time. This guarantees feature parity between training and
-real-world detection.
-
-Content/domain features are used from PhiUSIIL CSV where column names match.
-A fraction of training samples have content features zeroed out so the model
-learns to detect phishing from lexical signals alone (simulating pages that
-can't be fetched).
+PhishGuard Model Training Pipeline (v4 — 21 Lexical Features)
+=============================================================
+All model inputs are self-extracted from raw URL strings using the Python
+implementation of the same 21-feature contract served by the TypeScript
+extension. The parity gate verifies both implementations agree before the
+exported Random Forest is shipped.
 """
 
 import pandas as pd
@@ -564,17 +559,16 @@ def load_and_prepare_dataset():
 
 def augment_with_missing_content(X, y, fraction=0.3):
     """
-    Zero out content/domain features for a fraction of training samples.
-    This teaches the model to detect phishing from lexical features alone
-    (simulating pages that can't be fetched at inference time).
+    Compatibility no-op retained for callers from the older mixed-feature
+    pipeline. The current model contains only 21 lexical URL features.
     """
     content_domain_cols = DOMAIN_FEATURES + CONTENT_FEATURES
     content_indices = [ALL_FEATURES.index(f) for f in content_domain_cols if f in ALL_FEATURES]
 
-    # v3 lexical-only: no content/domain features to zero out. Skip entirely —
-    # zeroing nothing and duplicating 30% of rows would only distort the set.
+    # There are no non-lexical features to mask. Duplicating rows would only
+    # distort the training set, so return it unchanged.
     if not content_indices:
-        print("\nContent-zeroed augmentation: skipped (lexical-only feature set, no content features).")
+        print("\nMissing-feature augmentation: skipped (21-feature lexical-only model).")
         return X, y
 
     n_augment = int(len(X) * fraction)

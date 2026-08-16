@@ -278,6 +278,8 @@ def report(name, urls, model, allowlist):
     phish = p >= PHISH_MIN
     # Extension behaviour: allowlisted URLs short-circuit to CLEAN.
     eff_flagged = flagged & ~onlist
+    eff_suspicious = (p >= CLEAN_MAX) & (p < PHISH_MIN) & ~onlist
+    eff_phish = phish & ~onlist
 
     print('=' * 84)
     print(f'  {name}  (n={len(urls)})')
@@ -285,7 +287,9 @@ def report(name, urls, model, allowlist):
     print(f'  in reputation allowlist:        {onlist.sum():5d} ({100*onlist.mean():5.1f}%)')
     print(f'  ML tier alone — flagged:        {flagged.sum():5d} ({100*flagged.mean():5.1f}%)   <-- ML false-positive rate')
     print(f'  ML tier alone — PHISHING:       {phish.sum():5d} ({100*phish.mean():5.1f}%)   <-- hard red alarms (>= {PHISH_MIN:.2f})')
-    print(f'  full pipeline  — flagged:       {eff_flagged.sum():5d} ({100*eff_flagged.mean():5.1f}%)   <-- what users experience')
+    print(f'  full pipeline  — SUSPICIOUS:    {eff_suspicious.sum():5d} ({100*eff_suspicious.mean():5.1f}%)   <-- amber caution')
+    print(f'  full pipeline  — PHISHING:      {eff_phish.sum():5d} ({100*eff_phish.mean():5.1f}%)   <-- red alarm')
+    print(f'  full pipeline  — flagged total: {eff_flagged.sum():5d} ({100*eff_flagged.mean():5.1f}%)')
     print(f'  mean score {p.mean():.3f}   median {np.median(p):.3f}')
     if tenants:
         print(f'  platform tenants:               {len(tenants):5d} ({100*len(tenants)/len(urls):5.2f}%)'
@@ -306,6 +310,8 @@ def report(name, urls, model, allowlist):
     return {'n': len(urls), 'ml_fpr': float(flagged.mean()),
             'ml_phish_rate': float(phish.mean()),
             'pipeline_fpr': float(eff_flagged.mean()),
+            'pipeline_suspicious_rate': float(eff_suspicious.mean()),
+            'pipeline_phish_rate': float(eff_phish.mean()),
             'mean_score': float(p.mean())}
 
 
@@ -355,8 +361,9 @@ def main():
         if k == 'model':
             continue
         print(f'  {k:<10} n={v["n"]:<6} ML FPR {100*v["ml_fpr"]:5.1f}%   '
-              f'pipeline FPR {100*v["pipeline_fpr"]:5.1f}%   '
-              f'hard red {100*v["ml_phish_rate"]:4.1f}%   mean {v["mean_score"]:.3f}')
+              f'pipeline amber {100*v["pipeline_suspicious_rate"]:5.1f}%   '
+              f'pipeline red {100*v["pipeline_phish_rate"]:4.1f}%   '
+              f'total {100*v["pipeline_fpr"]:5.1f}%   mean {v["mean_score"]:.3f}')
     print()
     print('  Target: ML FPR < 10%. This is the acceptance metric for the')
     print('  extension, not held-out corpus accuracy.')

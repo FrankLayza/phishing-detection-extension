@@ -23,11 +23,7 @@ const ALL_FEATURES = [
   'TLDLegitimateProb', 'URLCharProb', 'NoOfSubDomain', 'HasObfuscation', 'NoOfObfuscatedChar',
   'ObfuscationRatio', 'NoOfLettersInURL', 'LetterRatioInURL', 'NoOfDegitsInURL', 'DegitRatioInURL',
   'NoOfEqualsInURL', 'NoOfQMarkInURL', 'NoOfAmpersandInURL', 'NoOfOtherSpecialCharsInURL',
-  'SpacialCharRatioInURL', 'IsHTTPS', 'DomainAgeBucket', 'HasTitle', 'DomainTitleMatchScore',
-  'URLTitleMatchScore', 'HasFavicon', 'Robots', 'IsResponsive', 'NoOfURLRedirect', 'NoOfSelfRedirect',
-  'HasDescription', 'LineOfCode', 'LargestLineLength', 'NoOfPopup', 'NoOfiFrame',
-  'HasExternalFormSubmit', 'HasSocialNet', 'HasSubmitButton', 'HasHiddenFields',
-  'HasPasswordField', 'Bank', 'Pay', 'Crypto', 'HasCopyrightInfo'
+  'SpacialCharRatioInURL', 'IsHTTPS'
 ];
 
 interface TestConfig {

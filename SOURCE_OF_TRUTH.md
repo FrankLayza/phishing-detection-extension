@@ -254,7 +254,7 @@ nodes. Both implement `val * scale + min`, `<=` goes left, and soft-voting over
 `n_estimators`.
 
 > Supersedes the old `cross_validate_ts.mjs` 6-URL smoke test (0.01 tolerance), which was
-> deleted Aug 15, 2026 because it printed "All 44 scaled values match" for a 21-feature
+> deleted Aug 15, 2026 because it printed a stale feature-count message for a 21-feature
 > model. The replacement is stronger: exact agreement rather than a tolerance, and it runs
 > inside the harness that produces the headline metric.
 
@@ -392,7 +392,7 @@ char-frequency tables, and — since Aug 2026 — the same Public-Suffix-List do
 | Scaler: all `data_min_=0`, use `clip(x/DATA_MAX)` | Shipped `min_` has negative values; correct formula is `x*scale_+min_` |
 | Title-match features are 0–1 | Dataset/scaler prove **0–100** |
 | Accuracy 97.89%, FPR 0.62% | Unverified; measured v4 = 94.02% / 4.32% FPR |
-| 44 features | v4 uses **21** (lexical-only) |
+| Mixed lexical, domain, and content features | v4 uses **21 lexical features** only |
 | Dataset ~235k | Phishing: 100,945 PhiUSIIL; Legit: 110,000 Cisco top-1M |
 | Model is "lightweight" | JSON export = 19.4 MB (down from 175.8 MB) |
 | "100% parity, 0.000000 divergence" | Extractor parity 0 mismatches / 20,160 values; inference exact on 4 cross-checked URLs |

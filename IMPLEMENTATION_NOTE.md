@@ -1059,7 +1059,7 @@ now produces identical values.
   Threshold sweep (0.60/0.65) is documented above; product decision pending.
 * `simulate_extension.mjs` / `diagnose_url.mjs` keep their own drifted inlined extractors
   (fine for quick checks; don't cite them for parity).
-* `cross_validate_ts.mjs` still prints stale v3 text ("All 44 scaled values match").
+* `cross_validate_ts.mjs` still prints a stale pre-lexical-only feature-count message.
 
 ---
 

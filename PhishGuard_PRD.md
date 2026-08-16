@@ -18,7 +18,7 @@ Frank Anthony | Final Year Computer Science Department of Computer Science | Phi
 
    - 3.1 Dataset 
 
-   - 3.2 Feature Engineering (all 44 features) 
+   - 3.2 Feature Engineering (21 lexical features)
 
    - 3.3 Training Procedure 
 
@@ -64,7 +64,7 @@ This PRD captures the full technical state of the project as of June 2026 and se
 
 ## **Primary Goals** 
 
-- Complete the browser-side feature extraction in feature-extractor.ts so all 44 features match the Python extractor. 
+- Keep the 21 lexical features in feature-extractor.ts exactly aligned with the Python extractor.
 
 - Validate that the TypeScript RF inference in onnx-runner.ts produces the same scores as the Python pipeline. 
 
@@ -82,7 +82,7 @@ The system has two major subsystems: the offline Python ML pipeline (training + 
 
 `datasets/phiusiil.csv` → `ml-pipeline/train.py` 
 
-`train.py: augment` → `extract 44 features` → `fit scaler` → `train RF` → `evaluate` 
+`train.py: augment` → `extract 21 lexical features` → `fit scaler` → `train RF` → `evaluate`
 
 `export_model_json.py` → `phishing-extension/assets/phishing_model.json (12.5 MB)` 
 
@@ -94,7 +94,7 @@ The system has two major subsystems: the offline Python ML pipeline (training + 
 [New tab loads]
 ```
 
-`content.ts` → `extract DOM + URL` → `feature-extractor.ts (44 features)` 
+`content.ts` → `extract URL` → `feature-extractor.ts (21 lexical features)`
 
 ```
 chrome.runtime.sendMessage(ANALYZE_PAGE, {features, url})
@@ -135,11 +135,11 @@ II `shap-approximator.ts` → `top explanation features` II `write result to chr
 
 
 
-## **3.2 Feature Engineering — All 44 Features** 
+## **3.2 Feature Engineering — 21 Lexical Features**
 
-Features are grouped into three categories. The index order below is the canonical order that MUST be maintained in both the Python training pipeline and the TypeScript browser extractor. Any mismatch in order will corrupt inference results. 
+The model uses only URL-string features. The index order below is the canonical order that MUST be maintained in both the Python training pipeline and the TypeScript browser extractor. Any mismatch in names or order will corrupt inference results.
 
-_**Group A: Lexical Features (indices 0–20) — extracted from URL string only**_ 
+_**Lexical Features (indices 0–20) — extracted from URL string only**_
 
 |**Idx**|**Feature Name**|**Description**|**Computation**|
 |---|---|---|---|
@@ -172,7 +172,7 @@ _**Group A: Lexical Features (indices 0–20) — extracted from URL string only
 
 
 
-_**Group B: Domain Features (indices 21–30)**_ 
+_**Removed legacy domain features**_
 
 |**Idx**|**Feature Name**|**Description**|**Source at inference**|
 |---|---|---|---|
@@ -189,9 +189,9 @@ _**Group B: Domain Features (indices 21–30)**_
 
 
 
-Note: DomainAgeBucket (index 21) had data_max_=0 in training (constant feature). It MUST be hardcoded to 0.0 in the browser extractor. Do not attempt to compute it. 
+These legacy domain features are not part of the shipped model or browser feature vector.
 
-_**Group C: Content Features (indices 31–43)**_ 
+_**Removed legacy content features**_
 
 |**Idx**|**Feature Name**|**Description**|**Implementation**|
 |---|---|---|---|
@@ -337,7 +337,7 @@ The Python inference pipeline serves as the ground-truth reference implementatio
 
 ## **6. 6. FEATURE EXTRACTION PARITY — CRITICAL GAP** 
 
-This is the single most important section for completing the extension. The file src/content/feature-extractor.ts currently defaults approximately 20 of 44 features to 0 instead of computing them. The extension will produce unreliable results until every feature is correctly implemented in TypeScript to match the Python extractor. 
+The extension and Python pipeline both implement the same 21 lexical features. The parity gate must confirm that every value agrees before an extractor or model change is accepted.
 
 ## **6.1 Feature Implementation Status** 
 
@@ -446,22 +446,22 @@ return TLD_SCORES[tld.toLowerCase()] ?? 0.5;
 
 ## _**MinMaxScaler in Browser (CRITICAL)**_ 
 
-All data_min_ values are exactly 0 for all 44 features. This simplifies the standard MinMaxScaler formula to a simple division. Any other formula is wrong. 
+The browser must apply the shipped scaler parameters to all 21 lexical features using the standard sklearn formula.
 
 ```
 // Standard formula: scaled = (x - data_min_) / (data_max_ - data_min_)
 ```
 
 ```
-// Since data_min_ = 0 for ALL features:
+// Use the exported scale_ and min_ values for each lexical feature:
 ```
 
 ```
-scaled = Math.max(0, Math.min(1, x / DATA_MAX[i]))
+scaled = x * SCALE[i] + MIN[i]
 ```
 
 ```
-// Where DATA_MAX is the 44-element array from scaler.json
+// Where SCALE and MIN are the 21-element arrays exported with the model
 ```
 
 ```
@@ -575,13 +575,13 @@ return phishProb / model.trees.length // average probability
 
 ## **9.2 Feature Extractor (TypeScript)** 
 
-- All 44 features implemented in feature-extractor.ts — no hardcoded zeros except DomainAgeBucket 
+- All 21 lexical features implemented in feature-extractor.ts with no placeholder values
 
 - For the 20 validation URLs, TypeScript feature vector matches Python feature vector within floating-point tolerance 
 
-- Feature order strictly matches the canonical 44-element order in this document 
+- Feature names and order strictly match the canonical 21-feature contract in this document
 
-- MinMaxScaler uses simplified formula: clip(x / DATA_MAX[i], 0, 1) — no other formula 
+- MinMaxScaler uses the exported sklearn formula: `scaled = raw * scale_ + min_`
 
 ## **9.3 End-to-End Extension** 
 
@@ -632,4 +632,3 @@ GSB queried only for borderline ML scores (0.50–0.85). GSB CLEAN caps score at
 All ML inference runs on-device. URLs are never sent to a remote classifier. Only the GSB API receives URLs, and only for borderline cases where the user arguably has greater need for accuracy than strict privacy. This aligns with the African/Nigerian cybersecurity deployment context where user trust is critical. 
 
 _PhishGuard PRD v1.0 | Generated 06 June 2026 | Frank Anthony | Final Year Computer Science_ 
-

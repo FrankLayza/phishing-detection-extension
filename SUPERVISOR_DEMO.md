@@ -167,7 +167,7 @@ Recoverable from git history if ever needed:
 - `diagnose_url.mjs`, `simulate_extension.mjs` — each carried its own inlined copy of the
   extractor, which drifted from the real one and gave different answers for the same URL.
 - `cross_validate_ts.mjs` (+ `cross_validation_data.json`, `gen_cross_validation.py`) —
-  a 6-URL inference smoke test that printed "All 44 scaled values match" for a
+  a 6-URL inference smoke test that printed a stale feature-count message for a
   21-feature model.
 
 **Use `ml-pipeline/demo_supervisor.mjs` for everything.** It is the only script that

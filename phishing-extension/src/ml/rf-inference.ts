@@ -4,6 +4,7 @@
  * No ONNX dependency required — pure TypeScript tree traversal.
  */
 import type { FeatureVector } from "../types";
+import { verdictFor, type Verdict } from "../verdict";
 
 interface TreeLeaf {
   v: number[];  // class probabilities [p_safe, p_phishing]
@@ -51,7 +52,7 @@ export class MLRunner {
     console.log(`PhishGuard: Model loaded (${this.model!.n_estimators} trees, ${this.model!.n_features} features)`);
   }
 
-  async predict(features: FeatureVector): Promise<{ isPhishing: boolean; score: number }> {
+  async predict(features: FeatureVector): Promise<{ score: number; verdict: Verdict }> {
     await this.init();
     const model = this.model!;
 
@@ -82,8 +83,8 @@ export class MLRunner {
     const phishingProb = probs.length > 1 ? probs[1] : probs[0];
 
     return {
-      isPhishing: phishingProb >= 0.5,
       score: phishingProb,
+      verdict: verdictFor(phishingProb),
     };
   }
 }
