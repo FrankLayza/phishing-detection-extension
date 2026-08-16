@@ -92,6 +92,32 @@ run from a fresh clone, because its input fixture was gitignored.
    Corollary for the whole cleanup class: `git rm` is recoverable, `rm` on a gitignored
    file is not.
 
+### …and a seventh, about publishing 🔒
+
+7. **A superseded experiment blocked a current release, and the recommended fix was a
+   trap.** Aug 16, 2026. GitHub rejected the first push: a 175.82 MB
+   `phishing_model.json` — a **300-tree** export (`0a40139c`) in two early commits,
+   superseded by `0537be5`'s retrain to the 100 trees that ship at 19.6 MB. **GitHub
+   validates every blob in the pushed history, not just `HEAD`**, so an artifact nobody
+   had thought about for weeks stopped a finished project from being published.
+
+   Fixed with `git filter-repo --strip-blobs-with-ids` on that one blob id, behind a
+   verified `git bundle --all` backup. 29 commits and all 29 subjects survived; the shipped
+   model md5 is unchanged; largest blob in history is now 26 MB.
+
+   **Git LFS — which GitHub's error message recommends — would have been the wrong fix
+   here.** It preserves every version, but a clone made without `git-lfs` installed gets a
+   ~130-byte pointer file where the model should be, so the extension silently loads
+   nothing. That is §1.2 of this file happening again, to an examiner, on purpose. When the
+   product depends on a large binary being *present*, LFS converts a loud build failure
+   into a silent one. The model stays an ordinary git file.
+
+   Corollaries: `git filter-repo` changes **every** SHA after the earliest edited commit —
+   fine before the first push, a rebase burden after it. And on this machine `pip install
+   git-filter-repo` lands outside `PATH`
+   (`%APPDATA%\Python\Python311\site-packages\git_filter_repo.py`), so `git filter-repo`
+   reports "not a git command" — invoke the module file with `python`.
+
 ## 1a. Reproducibility: verified, and a cautionary tale ✅
 
 **Training IS deterministic in a fixed environment.** Two consecutive runs of

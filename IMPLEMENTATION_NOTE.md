@@ -87,11 +87,75 @@ Build state unchanged from the Aug 15 production build (`tsc` exit 0, 3/3 assets
 model md5 `c39d40fd2ed03e80ced29c2f0a6eb57d` identical in `assets/` and
 `build/chrome-mv3-prod/assets/`.
 
-### Not done: push
+### Pushed — after stripping a 175 MB blob from history
 
-`git remote -v` is empty, there is no upstream for `main`, and `gh` is not installed. Nine
-commits sit on local `main` with nowhere to go. Naming or creating the destination is the
-author's call, not mine — see `handoff.md` §3.
+`https://github.com/FrankLayza/phishing-detection-extension` · `main` @ `7ff8d73`.
+
+The first push attempt was rejected by GitHub's pre-receive hook:
+
+```
+remote: error: File phishing-extension/assets/phishing_model.json is 175.82 MB;
+        this exceeds GitHub's file size limit of 100.00 MB
+```
+
+The *shipped* model is 19.6 MB (20,586,218 bytes). The 175.82 MB blob
+(`0a40139c`, 184,357,659 bytes) was a **300-tree** export —
+`{"n_estimators":300,…}` — carried by two early commits, `68eee7b` ("Retrain
+21-feature Random Forest model…") and `4a1f2d7` ("feat: updated the UI"). Commit
+`0537be5` ("chore: retrain model (n=100, depth=20)") is the one that replaced it
+with the 100-tree model that ships. So the blocking artifact was a superseded
+experiment this project had already moved off; GitHub checks every blob in the
+pushed history, not just `HEAD`.
+
+Eight versions of `phishing_model.json` exist across history (175 / 26 / 22 / 19 /
+19 / 18 / 17 / 12 MB). Only the 175 MB one breaches the limit.
+
+**Chosen fix: strip that single blob.** Rejected alternative: `git lfs migrate`.
+LFS would preserve all eight versions, but a clone made without `git-lfs`
+installed receives a ~130-byte pointer file where the model should be — which is
+*exactly* trap #2 in `memory.md` ("the shipped extension had no model for three
+days while every check stayed green"). Handing an examiner a repository that
+silently ships no model, to preserve a superseded experiment, is the wrong trade.
+It would also have put ~308 MB against a 1 GB LFS quota and required rewriting
+history regardless.
+
+Procedure:
+
+```bash
+git bundle create <temp>/phishguard-pre-rewrite-backup.bundle --all   # 51 MB
+git bundle verify <temp>/phishguard-pre-rewrite-backup.bundle          # complete history
+echo 0a40139c139d58ceed78aace557d2d632e425610 > <temp>/strip_ids.txt
+python .../git_filter_repo.py --strip-blobs-with-ids <temp>/strip_ids.txt --force
+git remote add origin <url>      # filter-repo removes 'origin' by design
+git push -u origin main
+```
+
+`git-filter-repo` 2.47.0 was installed via `pip`; on this machine it lands in
+`%APPDATA%\Python\Python311\site-packages\git_filter_repo.py` and is **not** on
+`PATH`, so `git filter-repo` fails — invoke the module file with `python`.
+
+Verified before trusting the rewrite:
+
+| Check | Before | After |
+|---|---|---|
+| Commits | 29 | **29** |
+| Commit subjects | 29 | **byte-identical set** (`diff` clean) |
+| Tracked files | 64 | **64** |
+| Shipped model md5 at `HEAD` | `c39d40fd…` | **`c39d40fd…`** |
+| Largest blob in history | 175 MB | **26 MB** |
+| Blobs > 100 MB | 1 | **0** |
+| Working tree | clean | clean |
+
+`origin/main` == local `HEAD` == `7ff8d73`. `parity_urls.json` (39,260 B) and
+`phishing_model.json` (20,586,218 B) both confirmed present on the remote branch —
+so the fixture fix above is live, and a fresh `git clone` can run the parity gate.
+
+Two consequences worth recording: **every commit SHA changed** (harmless — nothing
+had been pushed, so no rebase burden on anyone), and the two early commits no longer
+contain a model file at all. They could not have built a working extension from the
+current code anyway, since the shipped forest predates the URL-normalisation fix.
+The pre-rewrite history is recoverable from the bundle
+(`%TEMP%\phishguard-pre-rewrite-backup.bundle`) until that file is cleared.
 
 ---
 

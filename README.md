@@ -34,8 +34,9 @@ string alone cannot separate — see [`SOURCE_OF_TRUTH.md`](SOURCE_OF_TRUTH.md) 
 ## Install and run
 
 ```bash
-# 1. Build the extension
-cd phishing-extension
+# 1. Get the code and build the extension
+git clone https://github.com/FrankLayza/phishing-detection-extension.git
+cd phishing-detection-extension/phishing-extension
 pnpm install
 pnpm build          # postbuild copies the model into build/chrome-mv3-prod/assets/
 
@@ -43,6 +44,9 @@ pnpm build          # postbuild copies the model into build/chrome-mv3-prod/asse
 #    chrome://extensions -> enable Developer mode -> Load unpacked
 #    -> select phishing-extension/build/chrome-mv3-prod
 ```
+
+The 19.6 MB model is committed as an ordinary git file — no Git LFS, so a plain `git clone`
+gives you a working extension.
 
 Click the toolbar icon on any page to see the verdict, the risk score, and the signals
 behind it.

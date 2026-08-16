@@ -1,7 +1,8 @@
 # PhishGuard — Handoff
 
-**As of:** August 16, 2026 · branch `main` · working tree clean · **9 commits unpushed
-(no remote configured — see §0.1)**.
+**As of:** August 16, 2026 · branch `main` @ `7ff8d73` · working tree clean ·
+**pushed** to `github.com/FrankLayza/phishing-detection-extension` (see §0.1 — history was
+rewritten to get it there).
 
 Read `architecture.md` for structure, `memory.md` for traps, `SOURCE_OF_TRUTH.md`
 for numbers. This file is the transient layer: what just landed, what's open, and
@@ -37,31 +38,46 @@ gitignored and untracked, so it existed only in this working copy and a fresh cl
 never have run the parity gate. It is now committed. Full detail in
 `IMPLEMENTATION_NOTE.md` (Aug 16 entry), including what was deliberately *kept* and why.
 
-## 0.1 Not done: push — no remote exists
+## 0.1 Pushed — history was rewritten to remove a 175 MB blob
 
-`git remote -v` is empty, `main` has no upstream, and `gh` is not installed. Nine commits
-are on local `main` with nowhere to go. Whoever picks this up needs the destination from
-the author; do not create or publish a repository on their behalf. Once the URL is known:
+`https://github.com/FrankLayza/phishing-detection-extension` · `main` @ `7ff8d73`.
 
-```bash
-git remote add origin <url>
-git push -u origin main
-```
+GitHub's 100 MB per-file limit rejected the first attempt: two early commits (`68eee7b`,
+`4a1f2d7`) carried a **300-tree** `phishing_model.json` of 175.82 MB — the experiment
+`0537be5` replaced with the 100-tree model that ships (19.6 MB). GitHub checks every blob
+in the pushed history, not just `HEAD`.
 
-Nothing else in the finalisation request is outstanding.
+That single blob was stripped with `git filter-repo --strip-blobs-with-ids`. Git LFS was
+considered and rejected: a clone without `git-lfs` installed gets a 130-byte pointer where
+the model should be, which is trap #2 in `memory.md` all over again.
+
+**Everything else survived, and this was checked rather than assumed:** 29 commits before
+and after, commit-subject set byte-identical, 64 tracked files, shipped model md5 still
+`c39d40fd…`, largest blob in history now 26 MB, zero blobs over 100 MB.
+
+**Every commit SHA changed.** Harmless here — nothing had been pushed, so no one has the
+old SHAs. But any note, issue, or draft citing a pre-rewrite SHA is now stale. Pre-rewrite
+history is in `%TEMP%\phishguard-pre-rewrite-backup.bundle` (51 MB, `git bundle verify`d)
+until that directory is cleared; copy it somewhere durable if you want it kept.
+
+Full procedure and the filter-repo/PATH gotcha: `IMPLEMENTATION_NOTE.md`, Aug 16 entry.
+
+Nothing in the finalisation request is outstanding.
 
 ## 1. What landed
 
+SHAs below are **post-rewrite** (§0.1); the pre-rewrite ones no longer exist.
+
 ```
-<pending> chore: commit the parity fixture, drop regenerable artifacts
-d1e670b   docs: add README, remove drifted scripts and stale artifacts
-86f0d84   fix: retract the DomainLength FPR diagnosis; reject the corpus intervention
-a6075b6   fix: FPR harness now scores the shipped model, not the last retrain
-e543753   docs: retract the non-determinism claim — training is reproducible
-69d7373   fix: close three holes in the brand-impersonation guard
-ebd0314   docs: add architecture/handoff/memory as the cross-session pickup point
-eb3e2b3   feat: brand-impersonation guard for platform-hosted clones
-7f77ebc   chore: ignore demo-generated bundles and dissertation scratch files
+7ff8d73   chore: commit the parity fixture, drop regenerable artifacts
+19710c4   docs: add README, remove drifted scripts and stale artifacts
+a70b01a   fix: retract the DomainLength FPR diagnosis; reject the corpus intervention
+e3da28b   fix: FPR harness now scores the shipped model, not the last retrain
+6d8cced   docs: retract the non-determinism claim — training is reproducible
+1762979   fix: close three holes in the brand-impersonation guard
+14c134b   docs: add architecture/handoff/memory as the cross-session pickup point
+3aad472   feat: brand-impersonation guard for platform-hosted clones
+7ad13db   chore: ignore demo-generated bundles and dissertation scratch files
 ```
 
 `eb3e2b3` introduced the reputation seam (`src/ml/reputation.ts`), the shared brand
@@ -245,11 +261,10 @@ deliberately in the demo. Revisit only if the supervisor pushes on it.
    it gained. The residual FPR is an information ceiling, which is a finding rather than
    a task.
 
-**Nothing on this list is blocking a demo.** What is left is one mechanical step and some
-judgement calls:
+**Nothing on this list is blocking a demo, and nothing is blocking release.** What is left
+is judgement, not work:
 
-4. **Push** — needs a remote URL from the author (§0.1). This is the only incomplete item
-   from the finalisation request.
+4. ~~Push~~ — **done** (§0.1), after stripping a 175 MB blob from history.
 5. Decide §3 D (whether brand impersonation should add risk rather than only withhold a
    discount). Currently documented as a deliberate limitation and shown in the demo.
 6. Decide whether to extend `PLATFORM_HOSTS` to the user-content hosts listed in §3 E —
