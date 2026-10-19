@@ -95,3 +95,16 @@ generate_chapter2.py
 _extract_docx.py
 _out_*.txt
 *.docx
+
+# Generated dissertation/report working files and one-off tooling
+report-figures/
+research/
+REFERENCE_AUDIT.md
+SUMMARY.md
+*_current*.txt
+screenshot_contact_*.jpg
+expand_chapter2_literature_review.py
+finalize_report_with_audit.py
+generate_report_figures.py
+insert_report_figures.py
+update_final_year_report.py
